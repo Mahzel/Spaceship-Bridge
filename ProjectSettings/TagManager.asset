@@ -6,6 +6,7 @@ TagManager:
   tags:
   - Star
   - Planet
+  - PlayerShip
   layers:
   - Default
   - TransparentFX

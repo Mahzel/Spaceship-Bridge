@@ -10,7 +10,9 @@ public class SystemOverviewScreen : ComputerScreen
     protected override void Initialize()
     {
         base.Initialize();
-        UpdateSystemTable();
+        systemTable.text = "<align=left>Nom\t\t\t\tAz\t\tEl\t\tDist\n"
+            +"Update to populate system Overview."
+            +"</align>";
     }
 
     // Met à jour le tableau des objets célestes
@@ -28,6 +30,7 @@ public class SystemOverviewScreen : ComputerScreen
 
         foreach (Transform child in spaceEnvironment)
         {
+            if(!child.gameObject.activeInHierarchy) continue;
             if (child.name == "PlayerShip")
             {
                 playerShipTransform = child;
@@ -55,13 +58,12 @@ public class SystemOverviewScreen : ComputerScreen
             return;
         }
 
-        string tableContent = "<align=left>Nom\t\tAz\tEl\tDist\n";
+        string tableContent = "<align=left>Nom\t\t\t\tAz\t\tEl\t\tDist\n";
         foreach (GameObject body in celestialBodies)
         {
             float azimuth, elevation, distance;
-            (azimuth, elevation, distance) = CalculatePositionData(body.transform.position, playerShipTransform.position);
-            body.GetComponent<CelestialBody>().EnterData(azimuth, elevation, distance);
-            tableContent += $"{body.name}\t{azimuth:F1}°\t{elevation:F1}°\t{distance:F1} u\n";
+            (azimuth, elevation, distance) = body.GetComponent<CelestialBody>().GetData();
+            tableContent += $"{body.name}\t{azimuth:000.0}°\t{elevation:000.0}°\t{distance:00.0} u\n";
         }
         systemTable.text = tableContent + "</align>";
         UpdateStatus("Objets détectés : " + celestialBodies.Count);
@@ -79,13 +81,4 @@ public class SystemOverviewScreen : ComputerScreen
         }
     }
 
-    private (float azimuth, float elevation, float distance) CalculatePositionData(Vector3 targetPosition, Vector3 playerPosition)
-{
-    Vector3 relativePosition = targetPosition - playerPosition;
-    float distance = relativePosition.magnitude;
-    float azimuth = Mathf.Atan2(relativePosition.x, relativePosition.z) * Mathf.Rad2Deg;
-    if(azimuth<0) azimuth += 360f;
-    float elevation = Mathf.Atan2(relativePosition.y, new Vector2(relativePosition.x, relativePosition.z).magnitude) * Mathf.Rad2Deg;
-    return (azimuth, elevation, distance);
-}
 }

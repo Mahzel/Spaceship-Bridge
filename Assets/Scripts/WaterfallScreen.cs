@@ -55,7 +55,7 @@ public class WaterfallScreen : ComputerScreen
         // Ajoute le signal des étoiles (80 dB)
         foreach (GameObject star in stars)
         {
-            float azimuth = CalculateAzimuth(star.transform.position);
+            var (azimuth, _, _) = star.GetComponent<CelestialBody>().GetData();
             int index = AzimuthToIndex(azimuth);
             baseNoise[index] += 60f; // Ajoute 80 dB pour une étoile
         }
@@ -63,7 +63,7 @@ public class WaterfallScreen : ComputerScreen
         // Ajoute le signal des planètes (35 dB)
         foreach (GameObject planet in planets)
         {
-            float azimuth = CalculateAzimuth(planet.transform.position);
+            var (azimuth, _, _) = planet.GetComponent<CelestialBody>().GetData();
             int index = AzimuthToIndex(azimuth);
             baseNoise[index] += 35f; // Ajoute 35 dB pour une étoile
         }   
@@ -186,15 +186,6 @@ public class WaterfallScreen : ComputerScreen
         }
         return output;
     }
-
-    private float CalculateAzimuth(Vector3 objectPosition)
-{
-    // Calcul de l'angle en radians, puis conversion en degrés
-    float azimuth = Mathf.Atan2(objectPosition.x, objectPosition.z) * Mathf.Rad2Deg;
-    // Normalisation entre 0° et 360°
-    if (azimuth < 0) azimuth += 360f;
-    return azimuth;
-}
 
 private int AzimuthToIndex(float azimuth)
 {

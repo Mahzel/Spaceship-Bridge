@@ -12,13 +12,13 @@ public class DSPGraph : MonoBehaviour
     private List<GameObject> lineSegments = new List<GameObject>();
 
     // Dessine le graphique DSP avec les données fournies
-    public void DrawDSPGraph(float[] dspData)
+    public void DrawDSPGraph(float[] dspData, int pixelSize)
     {
         ClearGraph();
 
         float graphHeight = graphContainer.rect.height;
         float graphWidth = graphContainer.rect.width;
-        dataPoints = (int)(graphWidth);
+        dataPoints = (int)(graphWidth)/pixelSize;
 
         // Crée les points de la courbe
         Vector2[] points = new Vector2[dataPoints];

@@ -1,6 +1,7 @@
 using UnityEngine;
 using TMPro;
 using System.Collections.Generic;
+using System.Collections;
 
 public class SystemOverviewScreen : ComputerScreen
 {
@@ -13,6 +14,15 @@ public class SystemOverviewScreen : ComputerScreen
         systemTable.text = "<align=left>Nom\t\t\t\tAz\t\tEl\t\tDist\n"
             +"Update to populate system Overview."
             +"</align>";
+        StartCoroutine(UpdateData());
+    }
+    IEnumerator UpdateData()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(5f);
+            UpdateSystemTable();
+        }
     }
 
     // Met à jour le tableau des objets célestes
@@ -63,7 +73,7 @@ public class SystemOverviewScreen : ComputerScreen
         {
             float azimuth, elevation, distance;
             (azimuth, elevation, distance) = body.GetComponent<CelestialBody>().GetData();
-            tableContent += $"{body.name}\t{azimuth:000.0}°\t{elevation:000.0}°\t{distance:00.0} u\n";
+            tableContent += $"{body.name}\t{azimuth%360f:000.0}°\t{elevation:000.0}°\t{distance:00.0} u\n";
         }
         systemTable.text = tableContent + "</align>";
         UpdateStatus("Objets détectés : " + celestialBodies.Count);

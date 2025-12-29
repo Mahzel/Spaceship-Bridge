@@ -10,7 +10,16 @@ public class CelestialBody : MonoBehaviour
     public void Start()
     {
         UpdateData();
+    }
+
+    public void OnEnable()
+    {
         StartCoroutine(UpdateData());
+    }
+
+    public void OnDisable()
+    {
+        StopAllCoroutines();
     }
 
     // Constructeur implicite pour initialiser les valeurs

@@ -18,12 +18,12 @@ public class SystemManager : MonoBehaviour
     private string currentSystemID;
     char[] letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray();
     private int poolSize = 10;
-    private ObjectPool<CelestialBody> celestialPool;
+    private ObjectPool<Transform> celestialPool;
 
     public void Awake()
     {
         baseSeed = PlayerPrefs.GetInt("BaseSeed", defaultBaseSeed);
-        celestialPool = new ObjectPool<CelestialBody>(planetPrefab.GetComponent<CelestialBody>(), poolSize, transform);
+        celestialPool = new ObjectPool<Transform>(planetPrefab.transform, poolSize, transform);
     }
 
     void Start()
@@ -72,12 +72,13 @@ public class SystemManager : MonoBehaviour
         Debug.Log($"Génération du système {systemID} avec la seed finale {finalSeed}");
 
         // Génère une étoile au centre (nom : [ID] A)
-        CelestialBody star = celestialPool.Get();
+        Transform star = celestialPool.Get();
+        star.gameObject.tag = "Star";
         star.transform.position = Vector3.zero;
         star.name = $"{systemID} {letters[0]}*";
 
         // Génère 3 planètes aléatoires (nom : [ID] A1, [ID] A2, etc.)
-        for (int i = 0; i < (int)Random.Range(1f,poolSize-1); i++)
+        for (int i = 0; i < (int)Random.Range(0,poolSize-1); i++)
         {
             float distance = Random.Range(5f, 20f);
             float angle = Random.Range(0f, 360f);
@@ -92,18 +93,20 @@ public class SystemManager : MonoBehaviour
             Quaternion inclinationRotation = Quaternion.AngleAxis(inclination, Vector3.right);
             Vector3 finalPosition = inclinationRotation * orbitalPosition;
 
-            CelestialBody planet = celestialPool.Get();
+            Transform planet = celestialPool.Get();
+            planet.gameObject.tag = "Planet";
             planet.transform.position = finalPosition;
             planet.transform.parent = star.transform;
+            planet.gameObject.GetComponent<CelestialBody>().Start();
             planet.name = $"{systemID} A{i + 1}";
         }
     }
 
     public void JumpToNewSystem()
     {
-        currentSystemID = GenerateSystemID(Random.Range(0,640000));
-        Debug.Log($"ID du système généré : {currentSystemID}");
-        JumpToSystem(currentSystemID);
+        string sysID = GenerateSystemID(Random.Range(0,640000));
+        Debug.Log($"ID du système généré : {sysID}");
+        JumpToSystem(sysID);
     }
     public void JumpToSystem(string targetSystemID)
     {
@@ -132,9 +135,17 @@ public class SystemManager : MonoBehaviour
     // Supprime tous les enfants de SystemManager (les étoiles et planètes)
     foreach (Transform child in transform)
     {
-        if(!(child.name=="PlayerShip"))
+        if(!(child.name=="PlayerShip") && child.gameObject.activeInHierarchy)
         {
-            celestialPool.ReturnToPool(child.GetComponent<CelestialBody>());                
+            while(child.childCount>0)
+            {
+                foreach (Transform subchild in child)
+                {
+                    subchild.parent = transform;
+                    celestialPool.ReturnToPool(subchild);       
+                }
+            }
+            celestialPool.ReturnToPool(child);                
         }
     }
 }

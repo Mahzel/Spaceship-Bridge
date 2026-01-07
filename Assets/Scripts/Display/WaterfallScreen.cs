@@ -9,13 +9,15 @@ public class WaterfallScreen : ComputerScreen
     public RectTransform waterfallContainer; // Conteneur du waterfall
     public GameObject waterfallLinePrefab;   // Prefab d'une ligne du waterfall
     public GameObject waterfallPointPrefab;  // Prefab d'un point du waterfall
+    public GameObject sizeSlider;
+    public GameObject integrationToggle;
     public int pointCount;
     public int lineCount = 20;               // Nombre de lignes visibles
     public float maxValue = 100f;            // Valeur maximale (100)
     public float updateInterval = 2f;        // Intervalle d'ajout de ligne (5 secondes)
     private int pixelSize = 1;
     private int integration = 5;
-    float[][] integrator;
+    ArrayList integrator;
     int integrationCount = 1;
 
     private List<GameObject> waterfallLines = new List<GameObject>();
@@ -23,14 +25,10 @@ public class WaterfallScreen : ComputerScreen
     // Démarre la coroutine pour ajouter des lignes automatiquement
     protected override void Start()
     {
-        pixelSize = (int)transform.Find("Slider").GetComponent<Slider>().value;
+        pixelSize = (int)sizeSlider.GetComponent<Slider>().value;
         pointCount = (int)(waterfallContainer.rect.width)/pixelSize;
         lineCount = (int)(waterfallContainer.rect.height)/pixelSize;
-        integrator = new float[integration][];
-        for(int i = 0; i<integrator.Length;i++)
-        {
-            integrator[i] = new float[pointCount];
-        }
+        integrator = new ArrayList();
         GenerateRandomLine(); // Génère une ligne initiale
         StartCoroutine(AddLineRoutine());
     }
@@ -46,6 +44,13 @@ public class WaterfallScreen : ComputerScreen
             lineCount = (int)(waterfallContainer.rect.height)/pixelSize;
             GenerateRandomLine();
         }
+    }
+
+    public void onSizeChange()
+    {
+        integrator = new ArrayList();
+        integrationCount = 1;
+        ClearWaterfall();
     }
 
     // Génère une ligne aléatoire pour le waterfall
@@ -79,16 +84,13 @@ public class WaterfallScreen : ComputerScreen
             int index = AzimuthToIndex(azimuth);
             baseNoise[index] = 35f; // Ajoute 35 dB pour une étoile
         }
-        if(transform.Find("Toggle").GetComponent<Toggle>().isOn)
+        if(integrationToggle.GetComponent<Toggle>().isOn)
         {
             lineData = integrate(baseNoise);
         } 
         else
         {
-            for(int i = 0; i<integrator.Length;i++)
-            {
-                integrator[i] = new float[pointCount];
-            }
+            integrator.Clear();
             integrationCount = 1;       
             lineData = baseNoise;
         }
@@ -108,11 +110,10 @@ public class WaterfallScreen : ComputerScreen
     private float[] integrate(float[] line)
     {
         float[] outline = new float[line.Length];
-        for(int i = integration-1; i >= 1;i--)
-        {
-            integrator[i-1] = integrator[i];
+        integrator.Add(line);
+        if(integrator.Count > integration){
+            integrator.RemoveAt(0);
         }
-        integrator[integration-1] = line;
         for(int i = 0;i<line.Length;i++)
         {
             foreach(float[] integ in integrator)

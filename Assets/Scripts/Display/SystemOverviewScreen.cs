@@ -20,7 +20,7 @@ public class SystemOverviewScreen : ComputerScreen
     {
         while (true)
         {
-            yield return new WaitForSeconds(5f);
+            yield return new WaitForSeconds(1f);
             UpdateSystemTable();
         }
     }
@@ -36,22 +36,16 @@ public class SystemOverviewScreen : ComputerScreen
 
         // Récupère tous les enfants de spaceEnvironment (sauf le playerShip)
         List<GameObject> celestialBodies = new List<GameObject>();
-        Transform playerShipTransform = null;
+        Transform playerShipTransform = GameObject.FindGameObjectWithTag("PlayerShip").transform;
 
         foreach (Transform child in spaceEnvironment)
         {
             if(!child.gameObject.activeInHierarchy) continue;
-            if (child.name == "PlayerShip")
+            celestialBodies.Add(child.gameObject);
+            foreach (Transform grandChild in child)
             {
-                playerShipTransform = child;
-            }
-            else
-            {
-                celestialBodies.Add(child.gameObject);
-                foreach (Transform grandChild in child)
-                {
+                if(grandChild.gameObject.tag!="PlayerShip")
                     celestialBodies.Add(grandChild.gameObject);
-                }
             }
         }
 

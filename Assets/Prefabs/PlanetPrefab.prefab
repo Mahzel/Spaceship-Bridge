@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 7308328903671441073}
   - component: {fileID: 4705018899433045530}
+  - component: {fileID: 8606191090492557870}
   m_Layer: 0
   m_Name: PlanetPrefab
   m_TagString: Planet
@@ -44,3 +45,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cfd560f66a20c2b46b92074ea6505d78, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CelestialBody
+  azimuth: 0
+  elevation: 0
+  distance: 0
+  bodyName: 
+  bodyType: 
+  temperature: 0
+  mass: 0
+  radius: 0
+  density: 0
+  starLuminosity: 0
+  orbitalPeriod: 10
+  orbitalInclination: 0
+  orbitalRadius: 10
+  orbitalEccentricity: 0
+  centralBody: {fileID: 0}
+  orbitalAngle: 0
+--- !u!135 &8606191090492557870
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2758926297277098843}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.5
+  m_Center: {x: 0, y: 0, z: 0}

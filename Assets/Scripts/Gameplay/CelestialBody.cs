@@ -89,7 +89,7 @@ private (float azimuth, float elevation, float distance) CalculatePositionData()
     float azimuth = Vector3.SignedAngle(shipForward, relativePositionXZ, Vector3.up);
 
     // Élévation (angle vertical)
-    float elevation = Mathf.Atan2(relativePosition.y, playerShip.transform.position.magnitude) * Mathf.Rad2Deg;
+    float elevation = Mathf.Atan2(relativePosition.y, relativePosition.magnitude) * Mathf.Rad2Deg;
 
     return (azimuth, -elevation, distance);
 }

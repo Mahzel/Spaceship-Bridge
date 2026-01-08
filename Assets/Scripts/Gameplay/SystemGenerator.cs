@@ -260,7 +260,7 @@ int HashIDToSeed(string id)
     star.transform.localScale = Vector3.one * starSize;
     SphereCollider starCollider = star.GetComponent<SphereCollider>();
     starCollider.radius = starSize;
-    float minDistance = starSize * 1.5f;
+    float minDistance = starSize * 2f;
 
     // Stocker les propriétés de l'étoile dans un composant CelestialBody
     CelestialBody starBody = star.GetComponent<CelestialBody>();
@@ -269,7 +269,7 @@ int HashIDToSeed(string id)
         starBody = star.AddComponent<CelestialBody>();
     }
     starBody.bodyName = star.name;
-    starBody.bodyType = "Star"+starType;
+    starBody.bodyType = starType+"-Star";
     starBody.starLuminosity = starLuminosity;
     starBody.temperature = starTemperature;
     starBody.mass = starMass;
@@ -278,6 +278,7 @@ int HashIDToSeed(string id)
 
     // Variable pour stocker le rayon orbital moyen le plus grand
     float maxOrbitalRadius = 0f;
+    PlacePlayerShip(star.transform, Math.Max(maxOrbitalRadius * 2f,starBody.radius * 5f));
 
     // Générer 3 planètes aléatoires
     for (int i = 0; i < Random.Range(0,10); i++)
@@ -289,8 +290,8 @@ int HashIDToSeed(string id)
             maxOrbitalRadius = orbitalRadius;
         }
         float orbitalPeriod = Random.Range(15f, 30f); // Période orbitale en secondes (15-30s)
-        float orbitalInclination = Random.Range(0f, 30f);
-        float orbitalEccentricity = Random.Range(0f, 0.5f);
+        float orbitalInclination = Random.Range(-15f,15f);
+        float orbitalEccentricity = Random.Range(0f, 0.3f);
         float initialAngle = Random.Range(0f, 360f);
 
         // Calculer la position initiale en fonction des paramètres orbitaux

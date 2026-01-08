@@ -17,7 +17,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &7308328903671441073
 Transform:
   m_ObjectHideFlags: 0
@@ -61,6 +61,9 @@ MonoBehaviour:
   orbitalEccentricity: 0
   centralBody: {fileID: 0}
   orbitalAngle: 0
+  albedo: 0
+  phase: 0
+  apparentLuminosity: 0
 --- !u!135 &8606191090492557870
 SphereCollider:
   m_ObjectHideFlags: 0

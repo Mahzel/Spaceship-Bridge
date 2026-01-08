@@ -35,7 +35,6 @@ public class CelestialBody : MonoBehaviour
 
     void Start()
     {
-        StartCoroutine(Orbit());
     }
 
     void OnEnable()
@@ -90,9 +89,9 @@ private (float azimuth, float elevation, float distance) CalculatePositionData()
     float azimuth = Vector3.SignedAngle(shipForward, relativePositionXZ, Vector3.up);
 
     // Élévation (angle vertical)
-    float elevation = Mathf.Atan2(relativePosition.y, relativePositionXZ.magnitude) * Mathf.Rad2Deg;
+    float elevation = Mathf.Atan2(relativePosition.y, playerShip.transform.position.magnitude) * Mathf.Rad2Deg;
 
-    return (azimuth, elevation, distance);
+    return (azimuth, -elevation, distance);
 }
 
     // Simule l'orbite
@@ -100,6 +99,10 @@ private (float azimuth, float elevation, float distance) CalculatePositionData()
     {
         while (true)
         {
+            if(GameObject.FindGameObjectWithTag("PlayerShip")==null)
+            {
+                yield return null;
+            }
             if (centralBody != null)
             {
                 // Calculer l'anomalie moyenne (augmente linéairement avec le temps)

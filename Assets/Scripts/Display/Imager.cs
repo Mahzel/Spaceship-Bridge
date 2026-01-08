@@ -2,6 +2,8 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
 using Unity.Mathematics.Geometry;
+using Unity.Collections;
+using Unity.VisualScripting;
 
 public class Imager : MonoBehaviour
 {
@@ -20,6 +22,7 @@ public class Imager : MonoBehaviour
     private Coroutine _scanCoroutine;
     private int _displayWidth, _displayHeight; // Taille d'affichage
     private int _scanResolution; // Résolution du scan (calculée automatiquement)
+    private int _currentScanLine;
 
     void Start()
     {
@@ -110,12 +113,15 @@ public class Imager : MonoBehaviour
     {
         // Tableau pour stocker les couleurs d'un bloc
         Color[] blockColors = new Color[blockSize * blockSize];
+        RaycastHit[] raycastHits = new RaycastHit[1];
+        int col = 0;
 
         while (_isScanning)
         {
             // Balayer chaque bloc du champ de vision
             for (int sy = 0; sy < _scanResolution; sy++)
             {
+                _currentScanLine = sy * blockSize;
                 for (int sx = 0; sx < _scanResolution; sx++)
                 {
                     // Calculer la direction du rayon pour ce bloc
@@ -128,14 +134,13 @@ public class Imager : MonoBehaviour
                     rayDirection.Normalize();
 
                     // Lancer un Raycast
-                    RaycastHit hit;
-                    bool isHit = Physics.Raycast(playerShip.position, rayDirection, out hit, maxScanDistance);
+                    int HitCount = Physics.RaycastNonAlloc(playerShip.position, rayDirection, raycastHits, maxScanDistance);
 
                     // Déterminer la couleur du bloc en fonction de la détection
                     Color blockColor;
-                    if (isHit)
+                    if (HitCount>0)
                     {
-                        CelestialBody celestialBody = hit.collider.GetComponent<CelestialBody>();
+                        CelestialBody celestialBody = raycastHits[0].collider.GetComponent<CelestialBody>();
                         if (celestialBody.centralBody != null)
                         {
                             // Normaliser la luminosité pour l'intensité (par exemple, entre 0 et 1)
@@ -154,7 +159,7 @@ public class Imager : MonoBehaviour
                     else
                     {
                         // Bruit de fond faible
-                        blockColor = GetIntensityColor(Random.Range(0f,0.00001f)*gainSlider.value);
+                        blockColor = GetIntensityColor(Random.Range(0f,0.0001f)*gainSlider.value);
                     }
 
                     // Remplir le tableau de couleurs pour le bloc
@@ -169,12 +174,25 @@ public class Imager : MonoBehaviour
                     _scannedTexture.SetPixels(startX, startY, blockSize, blockSize, blockColors);
                 }
                 yield return new WaitForSeconds(updateInterval);
+                DrawScanLine(_currentScanLine, col%2);
                 _scannedTexture.Apply();
             }
-
+            col++;
             // Appliquer toutes les modifications à la texture
         }
     }
+    private void DrawScanLine(int y, int color)
+    {
+        for (int x = 0; x < 5; x++)
+        {
+            _scannedTexture.SetPixel(x, y, color==1 ? Color.darkGreen : Color.yellow);
+        }
+        for (int x = _displayWidth-1; x >= _displayWidth-5; x--)
+        {
+            _scannedTexture.SetPixel(x, y, color==1 ? Color.darkGreen : Color.yellow);
+        }
+    }
+
 
     // Convertir l'intensité en couleur (noir → vert → blanc)
     private Color GetIntensityColor(float intensity)

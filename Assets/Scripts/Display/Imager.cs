@@ -1,17 +1,21 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using TMPro;
+using Unity.Hierarchy;
+using System;
 
 /// <summary>
-/// Gère le système de scan et d'imagerie pour le projet Spaceship Bridge.
-/// Ce script permet de détecter les objets célestes et d'afficher une représentation visuelle
-/// avec une mire de visée et un système de zoom.
+/// Gère un système de capteur passif pour le projet Spaceship Bridge.
+/// Simule un capteur optique/infrarouge qui mesure la luminosité apparente dans chaque direction.
+/// La mire est gérée par des sprites (pas de dessin direct sur la texture).
 /// </summary>
 public class Imager : MonoBehaviour
 {
     // =========================================================================
-    #region VARIABLES PUBLIQUES (CONFIGURATION DANS L'INSPECTEUR)
+    #region PARAMÈTRES PUBLIQUES (CONFIGURATION DANS L'INSPECTEUR)
     // =========================================================================
 
     #region Display Settings
@@ -21,22 +25,28 @@ public class Imager : MonoBehaviour
     /// <summary> Référence au vaisseau du joueur. </summary>
     public Transform playerShip;
 
-    /// <summary> Référence à l'étoile pour calculer la phase des objets célestes. </summary>
+    /// <summary> Référence à l'étoile principale (pour calculer les phases). </summary>
     public Transform star;
     #endregion
 
     #region Scan Settings
-    /// <summary> Distance maximale de détection (en unités Unity). </summary>
-    public float maxScanDistance = 500f;
+    /// <summary> Distance maximale de détection (en UA). </summary>
+    public float maxScanDistance = 5000f;
 
     /// <summary> Champ de vision en degrés (horizontal et vertical). </summary>
-    public float fieldOfView;
+    public float fieldOfView = 60f;
 
-    /// <summary> Taille d'un bloc de pixels (ex: 2x2, 10x10). </summary>
-    public int blockSize = 2;
+    /// <summary> Taille d'un bloc de pixels (résolution du capteur). </summary>
+    public int blockSize = 10;
 
-    /// <summary> Intervalle de mise à jour du scan (en secondes). </summary>
+    /// <summary> Intervalle de mise à jour (en secondes). </summary>
     public float updateInterval = 0.05f;
+
+    /// <summary> Gain du capteur (amplification du signal). </summary>
+    public float sensorGain = 1f;
+
+    /// <summary> Niveau de bruit de fond. </summary>
+    public float backgroundNoise = 0.1f;
     #endregion
 
     #region UI Controls
@@ -49,11 +59,12 @@ public class Imager : MonoBehaviour
     /// <summary> Slider pour ajuster le gain (intensité du signal). </summary>
     public Slider gainSlider;
 
+    public Slider dynSlider;
+
     /// <summary> Référence directe au bouton Zoom. </summary>
     public Button zoomButton;
-    public TMP_Text fovValue;
-    public TMP_Text gainValue;
-    public TMP_Text resValue;
+    public float offsetAzimuth=0;
+    public float offsetElevation=0;
     #endregion
 
     #region Crosshair Settings
@@ -65,22 +76,30 @@ public class Imager : MonoBehaviour
 
     /// <summary> Référence à l'Image UI pour la mire. </summary>
     public Image crosshairImage;
+
+    /// <summary> Texte pour afficher la résolution. </summary>
+    public TMP_Text resolutionText;
+    public TMP_Text fovText;
+    public TMP_Text gainText;
+    public TMP_Dropdown bodyList;
     #endregion
+    // =========================================================================
     #endregion
+
     // =========================================================================
     #region VARIABLES PRIVÉES
     // =========================================================================
 
-    /// <summary> Texture utilisée pour afficher le scan. </summary>
+    /// <summary> Texture pour afficher le scan. </summary>
     private Texture2D _scannedTexture;
 
     /// <summary> Indique si le scan est en cours. </summary>
     private bool _isScanning;
 
-    /// <summary> Coroutine pour le scan en cours. </summary>
+    /// <summary> Coroutine du scan. </summary>
     private Coroutine _scanCoroutine;
 
-    /// <summary> Largeur et hauteur de l'affichage. </summary>
+    /// <summary> Largeur et hauteur de l'affichage (en pixels). </summary>
     private int _displayWidth, _displayHeight;
 
     /// <summary> Résolution du scan (nombre de blocs). </summary>
@@ -89,13 +108,17 @@ public class Imager : MonoBehaviour
     /// <summary> Ligne actuelle du balayage. </summary>
     private int _currentScanLine;
 
-    /// <summary> Indique si le mode zoom est activé. </summary>
-    private bool isZoomed = false;
-
     /// <summary> Facteur de zoom (1 = pas de zoom, 10 = zoom x10). </summary>
-    private float fovFactor = 1f;
-    private float gain;
+    private float _zoomFactor = 1f;
+
+    /// <summary> Liste des objets célestes dans la scène. </summary>
+    private List<CelestialBody> _celestialBodies = new List<CelestialBody>();
+    private CelestialBody _selectedBody;
+
+    float maxExpectedLuminosity = 1000f;
+    // =========================================================================
     #endregion
+
     // =========================================================================
     #region MÉTHODES UNITY (MONOBEHAVIOUR)
     // =========================================================================
@@ -105,39 +128,45 @@ public class Imager : MonoBehaviour
     /// </summary>
     private void Start()
     {
-        // Initialisation des paramètres de base
-        fieldOfView = fovSlider.value/fovFactor;
-        fovValue.text = "FOV : "+fieldOfView+"°";
+        // Récupérer la taille de l'affichage
         blockSize = (int)resSlider.value;
-        gain = gainSlider.value;
-        gainValue.text = "Gain x "+gain;
-
-        // Récupérer la taille d'affichage
+        fieldOfView = fovSlider.value;
+        sensorGain = gainSlider.value;
+        maxExpectedLuminosity = dynSlider.value;
         _displayWidth = (int)display.rectTransform.rect.width;
         _displayHeight = (int)display.rectTransform.rect.height;
-        _scanResolution = Mathf.Min(_displayWidth, _displayHeight) / blockSize;
-        resValue.text = "Res : "+(fieldOfView/_scanResolution).ToString("F3")+"°/px";
+        _scanResolution = _displayWidth / blockSize;
 
-        // Initialisation de la texture
+        // Créer la texture du scan
         _scannedTexture = new Texture2D(_displayWidth, _displayHeight);
         display.texture = _scannedTexture;
-        ClearImage();
 
         // Trouver le vaisseau du joueur
         playerShip = GameObject.FindGameObjectWithTag("PlayerShip").transform;
 
-        // Initialisation du bouton Zoom
+        // Trouver tous les objets célestes dans la scène
+        FindAllCelestialBodies();
+
+        // Initialiser l'affichage
+        ClearImage();
+        UpdateText();
         InitializeZoomButton();
-        StartScanning();
     }
+    // =========================================================================
     #endregion
 
     // =========================================================================
     #region MÉTHODES PUBLIQUES (APPELÉES PAR L'UI)
     // =========================================================================
 
-    /// <summary> Démarre ou arrête le scan. </summary>
-    public void StartScanning()
+    public bool isScanning()
+    {
+        return _isScanning;
+    }
+    /// <summary>
+    /// Démarre ou arrête le scan.
+    /// </summary>
+    public void ToggleScan()
     {
         if (!_isScanning)
         {
@@ -151,78 +180,149 @@ public class Imager : MonoBehaviour
         }
     }
 
-    /// <summary> Active ou désactive le mode zoom. </summary>
+    /// <summary>
+    /// Active ou désactive le mode zoom.
+    /// </summary>
     public void ToggleZoom()
     {
-        isZoomed = !isZoomed;
-        fovFactor = isZoomed ? 10f : 1f;
-        fovChanged();
+        _zoomFactor = _zoomFactor == 1f ? 10f : 1f;
 
-        // Mise à jour de la mire
-        if (crosshairImage != null)
+        if (_zoomFactor == 10f)
         {
-            crosshairImage.sprite = isZoomed ? zoomCrosshairSprite : normalCrosshairSprite;
-        }
-
-        // Mise à jour du bouton Zoom
-        UpdateZoomButton();
-    }
-
-    /// <summary> Met à jour le champ de vision (FOV) en fonction du slider. </summary>
-    public void fovChanged()
-    {
-        fieldOfView = fovSlider.value / fovFactor;
-        fovValue.text = "FOV : "+fieldOfView+"°";
-        resValue.text = "Res : "+(fieldOfView/_scanResolution).ToString("F3")+"°/px";
-        if (_isScanning)
-        {
-            StopScanning();
-            StartScanning();
-        }
-    }
-
-    /// <summary> Met à jour la résolution en fonction du slider. </summary>
-    public void resChanged()
-    {
-        int previous = blockSize;
-        if((int)resSlider.value%2==0)
-        {
-            blockSize = (int)resSlider.value+1;
+            crosshairImage.sprite = zoomCrosshairSprite;
+            if (zoomButton != null)
+            {
+                TMP_Text buttonText = zoomButton.GetComponentInChildren<TMP_Text>();
+                if (buttonText != null)
+                {
+                    buttonText.text = "Zoom On";
+                }
+                ColorBlock colors = zoomButton.colors;
+                colors.normalColor = Color.green;
+                zoomButton.colors = colors;
+            }
         }
         else
         {
-            blockSize = (int)resSlider.value;
+            crosshairImage.sprite = normalCrosshairSprite;
+            if (zoomButton != null)
+            {
+                TMP_Text buttonText = zoomButton.GetComponentInChildren<TMP_Text>();
+                if (buttonText != null)
+                {
+                    buttonText.text = "Zoom Off";
+                }
+                ColorBlock colors = zoomButton.colors;
+                colors.normalColor = Color.red;
+                zoomButton.colors = colors;
+            }
         }
-        if(blockSize == previous) return;
-        _scanResolution = Mathf.Min(_displayWidth, _displayHeight) / blockSize;
-        resValue.text = "Res : "+(fieldOfView/_scanResolution).ToString("F3")+"°/px";
+        UpdateFOV();
+    }
+
+    /// <summary>
+    /// Met à jour le FOV (appelé par un slider UI).
+    /// </summary>
+    public void UpdateFOV()
+    {
+        fieldOfView = fovSlider.value/_zoomFactor;
+        UpdateText();
+
+        if (_isScanning)
+        {
+            StopScanning();
+            ToggleScan();
+        }
+    }
+
+    public void UpdateDynamic()
+    {
+        maxExpectedLuminosity = dynSlider.value;
+    }
+
+    /// <summary>
+    /// Met à jour la taille des blocs (appelé par un slider UI).
+    /// </summary>
+    public void UpdateBlockSize()
+    {
+        // Forcer une valeur impaire
+        int newBlockSize = Mathf.RoundToInt(resSlider.value);
+        if (newBlockSize % 2 == 0) newBlockSize++;
+
+        blockSize = Mathf.Clamp(newBlockSize, 1, 20);
+        _scanResolution = _displayWidth / blockSize;
 
         if (_isScanning)
         {
             StopScanning();
             _scannedTexture = new Texture2D(_displayWidth, _displayHeight);
             display.texture = _scannedTexture;
-            StartScanning();
+            ToggleScan();
         }
         else
         {
             _scannedTexture = new Texture2D(_displayWidth, _displayHeight);
             display.texture = _scannedTexture;
         }
+
+        UpdateText();
     }
 
-    public void gainChanged()
+    /// <summary>
+    /// Met à jour le gain du capteur (appelé par un slider UI).
+    /// </summary>
+    public void UpdateSensorGain()
     {
-        gain = gainSlider.value;
-        gainValue.text = "Gain x "+gain;
+        sensorGain = gainSlider.value;
+        UpdateText();
     }
+
+    /// <summary>
+/// Méthode appelée quand un corps est sélectionné dans le dropdown.
+/// </summary>
+public void OnBodySelected()
+{
+    int index = bodyList.value; //récupérer l'index de l'item séléctionné.
+    if (index == 0)
+    {
+        // Aucune sélection (option par défaut)
+        _selectedBody = null;
+        offsetAzimuth = 0f;
+        offsetElevation = 0f;
+        return;
+    }
+
+    // Mettre à jour le corps sélectionné
+    _selectedBody = _celestialBodies[index - 1];
+
+    // Calculer les offsets pour centrer l'objet sélectionné
+    if (_selectedBody != null)
+    {
+        offsetAzimuth = _selectedBody.azimuth;
+        offsetElevation = _selectedBody.elevation;
+    }
+
+    Debug.Log("Corps sélectionné : " + _selectedBody.bodyName);
+}
+
+
+    // =========================================================================
     #endregion
 
     // =========================================================================
     #region MÉTHODES PRIVÉES (UTILITAIRES)
     // =========================================================================
 
-    /// <summary> Efface l'image du scan. </summary>
+    private void UpdateText()
+    {
+        fovText.text = "FOV : "+fieldOfView+"°";
+        gainText.text = "Gain x "+sensorGain;
+        resolutionText.text = "Res : "+fieldOfView/_scanResolution+"°/px";
+    }
+
+    /// <summary>
+    /// Efface l'image du scan.
+    /// </summary>
     private void ClearImage()
     {
         Color[] clearColors = new Color[_displayWidth * _displayHeight];
@@ -234,8 +334,10 @@ public class Imager : MonoBehaviour
         _scannedTexture.Apply();
     }
 
-    /// <summary> Arrête le scan en cours. </summary>
-    public void StopScanning()
+    /// <summary>
+    /// Arrête le scan en cours.
+    /// </summary>
+    private void StopScanning()
     {
         if (_isScanning)
         {
@@ -245,7 +347,32 @@ public class Imager : MonoBehaviour
         }
     }
 
-    /// <summary> Initialise le bouton Zoom. </summary>
+    /// <summary>
+    /// Trouve tous les objets célestes dans la scène au démarrage.
+    /// </summary>
+    private void FindAllCelestialBodies()
+    {
+        CelestialBody[] bodies = FindObjectsByType<CelestialBody>(FindObjectsSortMode.None);
+        if(!_celestialBodies.Contains(bodies.First<CelestialBody>()))
+        {
+            _celestialBodies.Clear();
+                _celestialBodies.AddRange(bodies);
+            bodyList.ClearOptions();
+            List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
+            options.Add(new TMP_Dropdown.OptionData("None"));
+            foreach (CelestialBody body in _celestialBodies)
+            {
+                options.Add(new TMP_Dropdown.OptionData(body.bodyName));
+            }
+            bodyList.options = options;
+            bodyList.value = 0;
+            OnBodySelected();
+        }
+    }
+
+    /// <summary>
+    /// Initialise le bouton Zoom.
+    /// </summary>
     private void InitializeZoomButton()
     {
         if (zoomButton != null)
@@ -262,99 +389,45 @@ public class Imager : MonoBehaviour
         }
     }
 
-    /// <summary> Met à jour l'apparence du bouton Zoom. </summary>
-    private void UpdateZoomButton()
-    {
-        if (zoomButton != null)
-        {
-            TextMeshProUGUI buttonText = zoomButton.GetComponentInChildren<TextMeshProUGUI>();
-            if (buttonText != null)
-            {
-                buttonText.text = isZoomed ? "Zoom On" : "Zoom Off";
-            }
+/// <summary>
+/// Calcule la luminosité dans une direction donnée, avec pondération pour les bords.
+/// </summary>
+private float CalculateDirectionalLuminosity(float azimuth, float elevation)
+{
+    float totalLuminosity = UnityEngine.Random.Range(0f, 0.005f);
 
-            ColorBlock colors = zoomButton.colors;
-            colors.normalColor = isZoomed ? Color.green : Color.red;
-            zoomButton.colors = colors;
+    // Trier les objets par distance
+    List<CelestialBody> sortedBodies = _celestialBodies.OrderBy(body =>
+        body.distance).ToList();
+
+    foreach (CelestialBody body in sortedBodies)
+    {
+        if (body.distance > 5000f) continue;
+
+        // Calculer le rayon angulaire de l'objet
+        float angularRadius = body.angularSize;
+        float sigma = angularRadius/50f;
+        float bodyAzimuth = body.azimuth;
+        float bodyElevation = body.elevation;
+
+
+        // Calculer l'angle entre la direction du capteur et l'objet
+        float azimuthDiff = Mathf.Abs(azimuth - bodyAzimuth);
+        float elevationDiff = Mathf.Abs(elevation - bodyElevation);
+
+        if (azimuthDiff < angularRadius && elevationDiff < angularRadius)
+        {
+            // Pondération gaussienne pour les objets proches des bords
+            float weight = Mathf.Exp(-0.5f * (azimuthDiff * azimuthDiff + elevationDiff * elevationDiff) / (sigma * sigma));
+            float bodyLuminosity = body.apparentLuminosity;
+            totalLuminosity += bodyLuminosity * weight;
+            break;
         }
     }
-    #endregion
 
-    // =========================================================================
-    #region COROUTINES
-    // =========================================================================
+    return NormalizeLuminosity(totalLuminosity);
+}
 
-    /// <summary> Coroutine pour le scan en cours. </summary>
-    private IEnumerator ScanRoutine()
-    {
-        Color[] blockColors = new Color[blockSize * blockSize];
-        RaycastHit[] raycastHits = new RaycastHit[1];
-        int col = 0;
-
-        while (_isScanning)
-        {
-            for (int sy = 0; sy < _scanResolution; sy++)
-            {
-                _currentScanLine = sy * blockSize;
-
-                for (int sx = 0; sx < _scanResolution; sx++)
-                {
-                    // Calcul de la direction du rayon
-                    float angleX = Mathf.Lerp(-fieldOfView / 2, fieldOfView / 2, (float)sx / _scanResolution) * Mathf.Deg2Rad;
-                    float angleY = Mathf.Lerp(-fieldOfView / 2, fieldOfView / 2, (float)sy / _scanResolution) * Mathf.Deg2Rad;
-
-                    Vector3 rayDirection = playerShip.forward;
-                    rayDirection = Quaternion.AngleAxis(angleX * Mathf.Rad2Deg, playerShip.up) * rayDirection;
-                    rayDirection = Quaternion.AngleAxis(angleY * Mathf.Rad2Deg, playerShip.right) * rayDirection;
-                    rayDirection.Normalize();
-
-                    // Lancer un Raycast
-                    int hitCount = Physics.RaycastNonAlloc(playerShip.position, rayDirection, raycastHits, maxScanDistance);
-
-                    // Déterminer la couleur du bloc
-                    Color blockColor;
-                    if (hitCount > 0)
-                    {
-                        CelestialBody celestialBody = raycastHits[0].collider.GetComponent<CelestialBody>();
-                        if (celestialBody != null)
-                        {
-                            float finalIntensity = celestialBody.apparentLuminosity *gain;
-                            blockColor = GetIntensityColor(finalIntensity);
-                        }
-                        else
-                        {
-                            float intensity = Mathf.Clamp01((1f - (raycastHits[0].distance / maxScanDistance)) * gain);
-                            blockColor = GetIntensityColor(intensity);
-                        }
-                    }
-                    else
-                    {
-                        blockColor = GetIntensityColor(Random.Range(0f, 0.0001f) * gain);
-                    }
-
-                    // Appliquer la couleur au bloc
-                    for (int i = 0; i < blockColors.Length; i++)
-                    {
-                        blockColors[i] = blockColor;
-                    }
-
-                    int startX = sx * blockSize;
-                    int startY = sy * blockSize;
-                    _scannedTexture.SetPixels(startX, startY, blockSize, blockSize, blockColors);
-                }
-
-                yield return new WaitForSeconds(updateInterval);
-                DrawScanLine(_currentScanLine, col % 2);
-                _scannedTexture.Apply();
-            }
-            col++;
-        }
-    }
-    #endregion
-
-    // =========================================================================
-    #region MÉTHODES DE DESSIN
-    // =========================================================================
 
     /// <summary>
     /// Dessine une ligne de balayage à la position spécifiée.
@@ -379,24 +452,147 @@ public class Imager : MonoBehaviour
     }
 
     /// <summary>
-    /// Convertit une intensité en couleur (noir → vert → blanc).
+    /// Convertit une luminosité en couleur (noir → vert → blanc).
     /// </summary>
-    /// <param name="intensity">Intensité (0 à 1).</param>
+    /// <param name="luminosity">Luminosité (0 à 1).</param>
     /// <returns>Couleur correspondante.</returns>
-    private Color GetIntensityColor(float intensity)
+    private Color GetIntensityColor(float luminosity)
     {
-        if (intensity < 0.5f)
+        if (luminosity < 0.5f)
         {
-            // Dégradé noir → vert
-            float t = intensity * 2f;
+            float t = luminosity * 2f;
             return new Color(0, t, 0);
         }
         else
         {
-            // Dégradé vert → blanc
-            float t = (intensity - 0.5f) * 2f;
+            float t = (luminosity - 0.5f) * 2f;
             return new Color(t, 1, t);
         }
     }
+/// <summary>
+/// Normalise la luminosité en utilisant une échelle logarithmique ajustée.
+/// </summary>
+/// <param name="luminosity">Luminosité brute.</param>
+/// <returns>Luminosité normalisée (0 à 1).</returns>
+private float NormalizeLuminosity(float luminosity)
+{
+    // Ajouter un offset pour garantir que les étoiles faibles soient visibles
+    float minVisibleLuminosity = 0.001f; // Luminosité minimale visible (naines rouges)
+    float adjustedLuminosity = Mathf.Max(luminosity, minVisibleLuminosity);
+
+        if (adjustedLuminosity > 1)
+        {
+            int a = 0;
+        }
+
+    // Échelle logarithmique pour compresser les valeurs élevées
+    float logLuminosity = Mathf.Log10(1f + adjustedLuminosity);
+
+    // Normaliser en fonction de maxExpectedLuminosity
+    float normalizedLogLuminosity = logLuminosity / Mathf.Log10(1f + maxExpectedLuminosity);
+
+    // Garantir que les étoiles faibles soient visibles
+    return Mathf.Clamp01(normalizedLogLuminosity * 1.2f); // Augmenter légèrement la plage
+}
+
+
+
+    // =========================================================================
+    #endregion
+
+    // =========================================================================
+    #region COROUTINES
+    // =========================================================================
+
+/// <summary>
+/// Coroutine pour effectuer le scan passif avec lissage des bords.
+/// </summary>
+private IEnumerator ScanRoutine()
+{
+    Color[] blockColors = new Color[blockSize * blockSize];
+    int col = 0;
+
+    // Tableau pour stocker les luminosités des blocs adjacents (pour le lissage)
+    int integrator = 0;
+    int maxIntegrator = 20;
+    float[,,] luminosityGrid = new float[_scanResolution, _scanResolution,maxIntegrator-1];
+    
+    while (_isScanning)
+    {
+        if (_selectedBody != null)
+        {
+            offsetAzimuth = _selectedBody.azimuth;
+            offsetElevation = _selectedBody.elevation;
+        }
+
+       /* // Balayer chaque bloc du champ de vision
+        for (int sy = 0; sy < _scanResolution; sy++)
+        {
+            for (int sx = 0; sx < _scanResolution; sx++)
+            {
+                // Calculer l'azimuth et l'élévation pour ce bloc
+                float azimuth = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sx / _scanResolution) + offsetAzimuth;
+                float elevation = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sy / _scanResolution) + offsetElevation;
+
+                // Calculer la luminosité dans cette direction
+                float luminosity = CalculateDirectionalLuminosity(azimuth, elevation);
+                luminosityGrid[sx+1, sy+1] = luminosity*sensorGain; // Stocker la luminosité pour le lissage
+            }
+        }*/
+
+        // Appliquer le lissage et dessiner les blocs
+        for (int sy = 0; sy < _scanResolution; sy++)
+        {
+            _currentScanLine = sy * blockSize;
+            Spectrometer spcr = GameObject.FindAnyObjectByType<Spectrometer>();
+            spcr.UpdateSpectrometry();
+            for (int sx = 0; sx < _scanResolution; sx++)
+            {
+                /*// Lissage : moyenne des luminosités des blocs adjacents
+                float center = luminosityGrid[sx + 1, sy + 1];
+                float top = luminosityGrid[sx + 1, sy];
+                float bottom = luminosityGrid[sx + 1, sy + 2];
+                float left = luminosityGrid[sx, sy + 1];
+                float right = luminosityGrid[sx + 2, sy + 1];
+
+                float smoothedLuminosity = center * 0.6f + (top + bottom + left + right) * 0.1f;*/
+                // Calculer l'azimuth et l'élévation pour ce bloc
+                FindAllCelestialBodies();
+                float azimuth = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sx / _scanResolution) + offsetAzimuth;
+                float elevation = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sy / _scanResolution) + offsetElevation;
+                // Calculer la luminosité dans cette direction
+                float luminosity = CalculateDirectionalLuminosity(azimuth, elevation);
+                luminosityGrid[sx, sy, integrator] = luminosity;
+                luminosity = 0;
+                for(int i = 0; i < integrator; i++)
+                {
+                    luminosity += luminosityGrid[sx,sy,i];
+                }
+                luminosity/=integrator;
+
+                // Convertir en couleur
+                Color blockColor = GetIntensityColor(luminosity*sensorGain);
+                for(int i = 0; i< blockColors.Length;i++)
+                    {
+                        blockColors[i] = blockColor;
+                    }
+
+                // Appliquer la couleur au bloc
+                int startX = sx * blockSize;
+                int startY = sy * blockSize;
+                _scannedTexture.SetPixels(startX, startY, blockSize, blockSize, blockColors);
+            }
+
+            // Mise à jour progressive de la texture
+            DrawScanLine(_currentScanLine, col % 2);
+            _scannedTexture.Apply();
+            yield return new WaitForSeconds(updateInterval);
+        }
+        col++;
+        integrator = Mathf.Min(++integrator,maxIntegrator);
+    }
+}
+
+    // =========================================================================
     #endregion
 }

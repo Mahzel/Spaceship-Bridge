@@ -24,7 +24,9 @@ public class SystemManager : MonoBehaviour
     public GameObject playerShipPrefab;
 
     // Constantes pour les conversions d'unités
-    private const float SOLAR_RADIUS_IN_AU = 0.00465f; // 1 rayon solaire = 0.00465 UA
+    private const float UA_TO_GAME_UNITS = 10f; // 1 UA = 10 unités de jeu
+    private const float SOLAR_RADIUS_IN_UA = 0.00465f; // 1 rayon solaire = 0.00465 UA
+    private const float SOLAR_RADIUS_IN_GAME_UNITS = SOLAR_RADIUS_IN_UA * UA_TO_GAME_UNITS; // 1 rayon solaire = 0.0465 unités de jeu
 
     public void Awake()
     {
@@ -41,7 +43,7 @@ public class SystemManager : MonoBehaviour
     float CalculateMinimumOrbitalDistance(float starRadiusInGameUnits)
     {
         // La distance minimale est au moins 2 fois le rayon de l'étoile
-        return starRadiusInGameUnits * 1.1f;
+        return starRadiusInGameUnits * 1.2f;
     }
 
     // Calcule la largeur de l'orbite en fonction de la masse de la planète et de la masse de l'étoile
@@ -51,7 +53,6 @@ public class SystemManager : MonoBehaviour
         float hillSphereRadius = orbitalRadius * Mathf.Pow(planetMass / (3 * starMass), 1f / 3f);
 
         // La largeur minimale de l'orbite est proportionnelle à la sphère de Hill
-        // On utilise un facteur de 5 pour garantir une séparation suffisante
         return hillSphereRadius;
     }
 
@@ -115,7 +116,7 @@ public class SystemManager : MonoBehaviour
     {
         switch (bodyType)
         {
-            case "Etoile":
+            case "Star":
                 return Mathf.Clamp(mass, 0.5f, 5f); // Rayon entre 0.5 et 5 rayons solaires
 
             case "Gazeuse":
@@ -147,77 +148,6 @@ public class SystemManager : MonoBehaviour
 
         return new Vector3(x, y, z);
     }
-
-    // Détermine le type spectral de l'étoile
-    string DetermineStarType(float temperature)
-    {
-        if (temperature < 3700f)
-        {
-            return "M"; // Naine rouge
-        }
-        else if (temperature < 5200f)
-        {
-            return "K"; // Étoile orange
-        }
-        else if (temperature < 6000f)
-        {
-            return "G"; // Étoile jaune (comme le Soleil)
-        }
-        else if (temperature < 7500f)
-        {
-            return "F"; // Étoile jaune-blanche
-        }
-        else if (temperature < 10000f)
-        {
-            return "A"; // Étoile blanche
-        }
-        else if (temperature < 30000f)
-        {
-            return "B"; // Étoile bleue
-        }
-        else
-        {
-            return "O"; // Étoile bleue très chaude
-        }
-    }
-
-    // Calcule la luminosité de l'étoile en fonction de sa température
-    /// <summary>
-/// Calcule la luminosité de l'étoile en fonction de sa température et de son type spectral.
-/// </summary>
-/// <param name="temperature">Température de l'étoile en Kelvin.</param>
-/// <param name="starType">Type spectral de l'étoile.</param>
-/// <returns>Luminosité de l'étoile en unités de luminosité solaire (L☉).</returns>
-float DetermineStarLuminosity(float temperature, string starType)
-{
-    // Luminosité en fonction du type spectral et de la température
-    switch (starType)
-    {
-        case "M": // Naine rouge
-            return Random.Range(0.0001f, 0.1f); // Luminosité entre 0.0001 L☉ et 0.1 L☉
-
-        case "K": // Étoile orange
-            return Random.Range(0.1f, 0.6f); // Luminosité entre 0.1 L☉ et 0.6 L☉
-
-        case "G": // Étoile jaune (comme le Soleil)
-            return Random.Range(0.6f, 1.5f); // Luminosité entre 0.6 L☉ et 1.5 L☉
-
-        case "F": // Étoile jaune-blanche
-            return Random.Range(1.5f, 5f); // Luminosité entre 1.5 L☉ et 5 L☉
-
-        case "A": // Étoile blanche
-            return Random.Range(5f, 20f); // Luminosité entre 5 L☉ et 20 L☉
-
-        case "B": // Étoile bleue
-            return Random.Range(20f, 100f); // Luminosité entre 20 L☉ et 100 L☉
-
-        case "O": // Étoile bleue très chaude
-            return Random.Range(100f, 1000f); // Luminosité entre 100 L☉ et 1000 L☉
-
-        default:
-            return 1f; // Luminosité par défaut (1 L☉, comme le Soleil)
-    }
-}
 
 
     // Génère un albedo pour une planète en fonction de son type
@@ -260,6 +190,261 @@ float DetermineStarLuminosity(float temperature, string starType)
         return albedo;
     }
 
+    /// <summary>
+/// Randomise une position sur le diagramme HR et retourne la température et la luminosité.
+/// </summary>
+/// <param name="temperature">Température de l'étoile en Kelvin.</param>
+/// <param name="luminosity">Luminosité de l'étoile en luminosités solaires.</param>
+void RandomizeHRPosition(out float temperature, out float luminosity)
+{
+    // Choisir aléatoirement une région du diagramme HR
+    float region = Random.value;
+
+    if (region < 0.7f) // Séquence principale (70% des étoiles)
+    {
+        float mass = Random.Range(0.08f, 20f);
+        if (mass < 0.43f)
+        {
+            temperature = Random.Range(2400f, 3700f);
+            luminosity = 0.23f * Mathf.Pow(mass, 2.3f);
+        }
+        else if (mass < 0.8f)
+        {
+            temperature = Random.Range(3700f, 5200f);
+            luminosity = Mathf.Pow(mass, 4f);
+        }
+        else if (mass < 1.05f)
+        {
+            temperature = Random.Range(5200f, 6000f);
+            luminosity = Mathf.Pow(mass, 4f);
+        }
+        else if (mass < 1.4f)
+        {
+            temperature = Random.Range(6000f, 7500f);
+            luminosity = 1.4f * Mathf.Pow(mass, 3.5f);
+        }
+        else if (mass < 2.1f)
+        {
+            temperature = Random.Range(7500f, 10000f);
+            luminosity = 1.4f * Mathf.Pow(mass, 3.5f);
+        }
+        else if (mass < 16f)
+        {
+            temperature = Random.Range(10000f, 30000f);
+            luminosity = 1.4f * Mathf.Pow(mass, 3.5f);
+        }
+        else
+        {
+            temperature = Random.Range(30000f, 50000f);
+            luminosity = 32000f * mass;
+        }
+    }
+    else if (region < 0.85f) // Géantes rouges (15% des étoiles)
+    {
+        temperature = Random.Range(3500f, 5000f);
+        float mass = Random.Range(0.8f, 10f);
+        luminosity = Random.Range(10f, 1000f);
+    }
+    else if (region < 0.95f) // Supergéantes rouges (10% des étoiles)
+    {
+        temperature = Random.Range(3500f, 4500f);
+        float mass = Random.Range(10f, 40f);
+        luminosity = Random.Range(1000f, 100000f);
+    }
+    else // Naines blanches (5% des étoiles)
+    {
+        temperature = Random.Range(8000f, 100000f);
+        float mass = Random.Range(0.17f, 1.4f);
+        luminosity = Random.Range(0.001f, 0.1f);
+    }
+}
+
+/// <summary>
+/// Estime la masse d'une étoile en fonction de sa luminosité et de sa température.
+/// </summary>
+/// <param name="luminosity">Luminosité de l'étoile en luminosités solaires.</param>
+/// <param name="temperature">Température de l'étoile en Kelvin.</param>
+/// <returns>Masse de l'étoile en masses solaires.</returns>
+float EstimateStarMass(float luminosity, float temperature)
+{
+    // Naines blanches
+    if (temperature >= 8000f && luminosity <= 0.1f)
+    {
+        return Random.Range(0.17f, 1.4f);
+    }
+    // Naines rouges (M) et étoiles de faible masse
+    else if (temperature < 3700f && luminosity < 0.1f)
+    {
+        return Mathf.Pow(luminosity / 0.23f, 1f / 2.3f);
+    }
+    // Étoiles de la séquence principale (types K, G, F, A, B, O)
+    else if (temperature > 3500f && temperature < 50000f)
+    {
+        // Séquence principale
+        if (luminosity < 1000f)
+        {
+            return Mathf.Pow(luminosity / 1.4f, 1f / 3.5f);
+        }
+        // Supergéantes bleues
+        else if (temperature >= 10000f && luminosity >= 1000f)
+        {
+            return Random.Range(10f, 40f);
+        }
+        else
+        {
+            return Random.Range(20f, 50f);
+        }
+    }
+    // Géantes rouges
+    else if (temperature >= 3500f && temperature <= 5000f && luminosity >= 10f && luminosity <= 1000f)
+    {
+        return Random.Range(0.8f, 10f);
+    }
+    // Supergéantes rouges
+    else if (temperature >= 3500f && temperature <= 4500f && luminosity >= 1000f)
+    {
+        return Random.Range(10f, 40f);
+    }
+    // Hypergéantes rouges
+    else if (temperature >= 3500f && temperature <= 4500f && luminosity >= 10000f)
+    {
+        return Random.Range(20f, 50f);
+    }
+    // Supergéantes bleues
+    else if (temperature >= 10000f && luminosity >= 1000f)
+    {
+        return Random.Range(10f, 40f);
+    }
+    // Valeur par défaut
+    else
+    {
+        return 1f;
+    }
+}
+
+
+/// <summary>
+/// Calcule le rayon d'une étoile en rayons solaires en fonction de sa luminosité et de sa température.
+/// </summary>
+/// <param name="luminosity">Luminosité de l'étoile en luminosités solaires.</param>
+/// <param name="temperature">Température de l'étoile en Kelvin.</param>
+/// <returns>Rayon de l'étoile en rayons solaires.</returns>
+float CalculateStarRadius(float luminosity, float temperature)
+{
+    // Constante de Stefan-Boltzmann
+    float sigma = 5.670374419f * Mathf.Pow(10, -8f);
+
+    // Luminosité en watts (L_sun = 3.828e26 W)
+    float luminosityInWatts = luminosity * 3.828f * Mathf.Pow(10, 26f);
+
+    // Rayon en mètres
+    float radiusInMeters = Mathf.Sqrt(luminosityInWatts / (4f * Mathf.PI * sigma * Mathf.Pow(temperature, 4f)));
+
+    // Rayon en rayons solaires (R_sun = 6.957e8 m)
+    float radiusInSolarRadii = radiusInMeters / (6.957f * Mathf.Pow(10, 8f));
+
+    return radiusInSolarRadii;
+}
+
+/// <summary>
+/// Détermine le type spectral d'une étoile en fonction de sa luminosité et de sa température (position sur le diagramme HR).
+/// </summary>
+/// <param name="luminosity">Luminosité de l'étoile en luminosités solaires.</param>
+/// <param name="temperature">Température de l'étoile en Kelvin.</param>
+/// <returns>Type spectral de l'étoile.</returns>
+string DetermineStarType(float luminosity, float temperature)
+{
+    // Naines blanches
+    if (luminosity < 0.1f && temperature > 8000f)
+    {
+        return "White Dwarf";
+    }
+    // Naines rouges (M)
+    else if (luminosity < 0.1f && temperature < 3700f)
+    {
+        return "M";
+    }
+    // Étoiles de type K
+    else if (luminosity < 0.6f && temperature < 5200f)
+    {
+        return "K";
+    }
+    // Étoiles de type G
+    else if (luminosity < 1.5f && temperature < 6000f)
+    {
+        return "G";
+    }
+    // Étoiles de type F
+    else if (luminosity < 5f && temperature < 7500f)
+    {
+        return "F";
+    }
+    // Étoiles de type A
+    else if (luminosity < 20f && temperature < 10000f)
+    {
+        return "A";
+    }
+    // Étoiles de type B
+    else if (luminosity < 100f && temperature < 30000f)
+    {
+        return "B";
+    }
+    // Étoiles de type O
+    else if (luminosity < 1000f && temperature >= 30000f)
+    {
+        return "O";
+    }
+    // Géantes rouges
+    else if (luminosity >= 10f && luminosity < 1000f && temperature < 5000f)
+    {
+        return "Red Giant";
+    }
+    // Supergéantes rouges
+    else if (luminosity >= 1000f && temperature < 5000f)
+    {
+        return "Red Supergiant";
+    }
+    // Hypergéantes rouges
+    else if (luminosity >= 10000f && temperature < 5000f)
+    {
+        return "Red Hypergiant";
+    }
+    // Supergéantes bleues
+    else if (luminosity >= 1000f && temperature >= 10000f)
+    {
+        return "Blue Supergiant";
+    }
+    // Hypergéantes bleues
+    else if (luminosity >= 10000f && temperature >= 10000f)
+    {
+        return "Blue Hypergiant";
+    }
+    // Par défaut, si aucune condition n'est remplie
+    else
+    {
+        return "Unknown";
+    }
+}
+
+
+    // Convertit une distance en UA en unités de jeu
+    float UAToGameUnits(float distanceInUA)
+    {
+        return distanceInUA * UA_TO_GAME_UNITS;
+    }
+
+    // Convertit un rayon en rayons solaires en unités de jeu
+    float SolarRadiusToGameUnits(float radiusInSolarRadii)
+    {
+        return radiusInSolarRadii * SOLAR_RADIUS_IN_GAME_UNITS;
+    }
+
+    // Convertit une période en années en secondes de jeu
+    float YearsToGameSeconds(float periodInYears)
+    {
+        return periodInYears * 10f;
+    }
+
     string GenerateSystemID(int seed)
     {
         Random.InitState(seed);
@@ -286,6 +471,7 @@ float DetermineStarLuminosity(float temperature, string starType)
         }
     }
 
+
     void GenerateStarSystem(string systemID)
     {
         if (!IsValidSystemID(systemID))
@@ -303,52 +489,55 @@ float DetermineStarLuminosity(float temperature, string starType)
         Debug.Log($"Génération du système {systemID} avec la seed finale {finalSeed}");
 
         // Générer une étoile au centre
-        Vector3 starPosition = Vector3.zero;
-        GameObject star = celestialPool.Get().gameObject;
-        star.transform.position = starPosition;
-        star.name = $"{systemID} A";
+    Vector3 starPosition = Vector3.zero;
+    GameObject star = celestialPool.Get().gameObject;
+    star.transform.position = starPosition;
+    star.name = $"{systemID} A";
 
-        // Température de l'étoile
-        float starTemperature = Random.Range(3000f, 30000f);
+    // Randomiser une position sur le diagramme HR
+    float starTemperature, starLuminosity;
+    RandomizeHRPosition(out starTemperature, out starLuminosity);
 
-        // Déterminer les propriétés de l'étoile
-        string starType = DetermineStarType(starTemperature);
-        float starDensity = DetermineDensity("Etoile");
-        float starLuminosity = DetermineStarLuminosity(starTemperature, starType);
-        float starMass = Random.Range(1f, 10f);
-        float starSizeInSolarRadii = DetermineNormalizedSize("Etoile", starMass);
-        float starSizeInGameUnits = starSizeInSolarRadii * SOLAR_RADIUS_IN_AU;
+    // Estimer la masse de l'étoile
+    float starMass = EstimateStarMass(starLuminosity, starTemperature);
 
-        // Appliquer la taille à l'étoile
-        star.transform.localScale = Vector3.one * starSizeInGameUnits;
+    // Calculer le rayon de l'étoile
+    float starRadiusInSolarRadii = CalculateStarRadius(starLuminosity, starTemperature);
+    float starSizeInGameUnits = SolarRadiusToGameUnits(starRadiusInSolarRadii);
 
-        // Ajuster la taille du collider de l'étoile
-        SphereCollider starCollider = star.GetComponent<SphereCollider>();
-        if (starCollider != null)
-        {
-            starCollider.radius = starSizeInGameUnits;
-        }
-        else
-        {
-            Debug.LogWarning("Pas de SphereCollider trouvé sur l'étoile !");
-        }
+    // Appliquer la taille à l'étoile
+    star.transform.localScale = Vector3.one * starSizeInGameUnits;
 
-        // Stocker les propriétés de l'étoile dans un composant CelestialBody
-        CelestialBody starBody = star.GetComponent<CelestialBody>();
-        if (starBody == null)
-        {
-            starBody = star.AddComponent<CelestialBody>();
-        }
-        starBody.bodyName = star.name;
-        starBody.bodyType = starType + "-Star";
-        starBody.temperature = starTemperature;
-        starBody.mass = starMass;
-        starBody.radius = starSizeInGameUnits;
-        starBody.distance = 0f;
-        starBody.starLuminosity = starLuminosity;
+    // Ajuster la taille du collider de l'étoile
+    SphereCollider starCollider = star.GetComponent<SphereCollider>();
+    if (starCollider != null)
+    {
+        starCollider.radius = starSizeInGameUnits;
+    }
+    else
+    {
+        Debug.LogWarning("Pas de SphereCollider trouvé sur l'étoile !");
+    }
 
-        // Calculer la distance minimale pour les orbites en fonction du rayon de l'étoile
-        float minOrbitalDistanceInGameUnits = CalculateMinimumOrbitalDistance(starSizeInGameUnits);
+    // Stocker les propriétés de l'étoile dans un composant CelestialBody
+    CelestialBody starBody = star.GetComponent<CelestialBody>();
+    if (starBody == null)
+    {
+        starBody = star.AddComponent<CelestialBody>();
+    }
+    starBody.bodyName = star.name;
+    starBody.bodyType = DetermineStarType(starLuminosity, starTemperature);
+    starBody.temperature = starTemperature;
+    starBody.mass = starMass;
+    starBody.radius = starSizeInGameUnits;
+    starBody.solRadius = starRadiusInSolarRadii;
+    starBody.distance = 0f;
+    starBody.starLuminosity = starLuminosity;
+    starBody.chemicalComposition = DetermineChemicalComposition("Star");
+    starBody.spectrum = DetermineSpectrum(starBody.chemicalComposition);
+
+    // Calculer la distance minimale pour les orbites en fonction du rayon de l'étoile
+    float minOrbitalDistanceInGameUnits = CalculateMinimumOrbitalDistance(starSizeInGameUnits);
 
         // Liste pour stocker les orbites des planètes existantes
         List<(float radius, float width)> planetOrbits = new List<(float, float)>();
@@ -367,7 +556,8 @@ float DetermineStarLuminosity(float temperature, string starType)
             while (!validOrbit && attempts < 100)
             {
                 attempts++;
-                orbitalRadiusInGameUnits = Random.Range(minOrbitalDistanceInGameUnits, 50f * SOLAR_RADIUS_IN_AU);
+                float orbitalRadiusInUA = Random.Range(minOrbitalDistanceInGameUnits, 10f); // Distance en UA
+                orbitalRadiusInGameUnits = UAToGameUnits(orbitalRadiusInUA);
                 planetMass = Random.Range(0.1f, 5f);
                 orbitalWidthInGameUnits = CalculateOrbitalWidth(orbitalRadiusInGameUnits, planetMass, starMass);
 
@@ -393,8 +583,8 @@ float DetermineStarLuminosity(float temperature, string starType)
             planetOrbits.Add((orbitalRadiusInGameUnits, orbitalWidthInGameUnits));
 
             // Période orbitale en années
-            float orbitalPeriodInYears = Mathf.Sqrt(Mathf.Pow(orbitalRadiusInGameUnits / SOLAR_RADIUS_IN_AU, 3));
-            float orbitalPeriodInGameSeconds = orbitalPeriodInYears; //*fps
+            float orbitalPeriodInYears = Mathf.Sqrt(Mathf.Pow(orbitalRadiusInGameUnits / UA_TO_GAME_UNITS, 3));
+            float orbitalPeriodInGameSeconds = YearsToGameSeconds(orbitalPeriodInYears);
 
             float orbitalInclination = Random.Range(-15f, 15f);
             float orbitalEccentricity = Random.Range(0f, 0.3f);
@@ -410,11 +600,11 @@ float DetermineStarLuminosity(float temperature, string starType)
             planet.name = $"{systemID} A{i + 1}";
 
             // Déterminer les propriétés de la planète
-            string planetType = DeterminePlanetType(orbitalRadiusInGameUnits / SOLAR_RADIUS_IN_AU, starTemperature);
-            float planetTemperature = DetermineTemperature(orbitalRadiusInGameUnits / SOLAR_RADIUS_IN_AU, starTemperature);
+            string planetType = DeterminePlanetType(orbitalRadiusInGameUnits / UA_TO_GAME_UNITS, starTemperature);
+            float planetTemperature = DetermineTemperature(orbitalRadiusInGameUnits / UA_TO_GAME_UNITS, starTemperature);
             float planetDensity = DetermineDensity(planetType);
             float planetSizeInSolarRadii = DetermineNormalizedSize(planetType, planetMass);
-            float planetSizeInGameUnits = planetSizeInSolarRadii * SOLAR_RADIUS_IN_AU;
+            float planetSizeInGameUnits = SolarRadiusToGameUnits(planetSizeInSolarRadii);
             float planetAlbedo = GenerateAlbedo(planetType);
 
             // Appliquer la taille à l'objet (scale)
@@ -441,10 +631,12 @@ float DetermineStarLuminosity(float temperature, string starType)
             body.bodyType = planetType;
             body.temperature = planetTemperature;
             body.mass = planetMass;
-            body.distance = orbitalRadiusInGameUnits / SOLAR_RADIUS_IN_AU;
+            body.distance = orbitalRadiusInGameUnits / UA_TO_GAME_UNITS;
             body.density = planetDensity;
             body.radius = planetSizeInGameUnits;
             body.albedo = planetAlbedo;
+            body.chemicalComposition = DetermineChemicalComposition(planetType);
+            body.spectrum = DetermineSpectrum(body.chemicalComposition);
 
             // Configurer les paramètres orbitaux
             body.orbitalPeriod = orbitalPeriodInGameSeconds;
@@ -542,5 +734,107 @@ float DetermineStarLuminosity(float temperature, string starType)
                 celestialPool.ReturnToPool(child);
             }
         }
+    }
+
+    List<ChemicalComposition> DetermineChemicalComposition(string bodyType)
+    {
+        List<ChemicalComposition> composition = new List<ChemicalComposition>();
+
+        switch (bodyType)
+        {
+            case "Star":
+                // Composition typique d'une étoile (principalement hydrogène et hélium)
+                composition.Add(new ChemicalComposition { element = "H", percentage = 73.46f });
+                composition.Add(new ChemicalComposition { element = "He", percentage = 24.85f });
+                composition.Add(new ChemicalComposition { element = "O", percentage = 0.77f });
+                composition.Add(new ChemicalComposition { element = "C", percentage = 0.29f });
+                composition.Add(new ChemicalComposition { element = "Fe", percentage = 0.16f });
+                break;
+
+            case "Gazeuse":
+                // Composition typique d'une géante gazeuse (principalement hydrogène et hélium)
+                composition.Add(new ChemicalComposition { element = "H", percentage = 89.8f });
+                composition.Add(new ChemicalComposition { element = "He", percentage = 10.2f });
+                break;
+
+            case "Rocheuse":
+                // Composition typique d'une planète rocheuse (silicates et métaux)
+                composition.Add(new ChemicalComposition { element = "O", percentage = 46.6f });
+                composition.Add(new ChemicalComposition { element = "Si", percentage = 27.7f });
+                composition.Add(new ChemicalComposition { element = "Fe", percentage = 8.0f });
+                composition.Add(new ChemicalComposition { element = "Mg", percentage = 3.6f });
+                composition.Add(new ChemicalComposition { element = "Al", percentage = 1.5f });
+                break;
+
+            case "Glacée":
+                // Composition typique d'une planète glacée (eau, méthane, ammoniac)
+                composition.Add(new ChemicalComposition { element = "H", percentage = 80.0f });
+                composition.Add(new ChemicalComposition { element = "O", percentage = 10.0f });
+                composition.Add(new ChemicalComposition { element = "C", percentage = 5.0f });
+                composition.Add(new ChemicalComposition { element = "N", percentage = 5.0f });
+                break;
+
+            default:
+                // Composition par défaut
+                composition.Add(new ChemicalComposition { element = "H", percentage = 70.0f });
+                composition.Add(new ChemicalComposition { element = "He", percentage = 28.0f });
+                break;
+        }
+
+        return composition;
+    }
+
+    Spectrum DetermineSpectrum(List<ChemicalComposition> composition)
+    {
+        Spectrum spectrum = new Spectrum();
+        spectrum.emissionLines = new List<SpectralLine>();
+        spectrum.absorptionLines = new List<SpectralLine>();
+
+        foreach (var element in composition)
+        {
+            // Ajouter des raies spectrales typiques pour chaque élément
+            switch (element.element)
+            {
+                case "H": // Hydrogène
+                    spectrum.emissionLines.Add(new SpectralLine { wavelength = 656.3f, intensity = element.percentage * 10f }); // Raie H-alpha
+                    spectrum.emissionLines.Add(new SpectralLine { wavelength = 486.1f, intensity = element.percentage * 8f }); // Raie H-beta
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 434.0f, intensity = element.percentage * 5f }); // Raie H-gamma
+                    break;
+
+                case "He": // Hélium
+                    spectrum.emissionLines.Add(new SpectralLine { wavelength = 587.6f, intensity = element.percentage * 5f }); // Raie D3
+                    break;
+
+                case "O": // Oxygène
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 777.4f, intensity = element.percentage * 3f });
+                    break;
+
+                case "C": // Carbone
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 477.0f, intensity = element.percentage * 2f });
+                    break;
+
+                case "Fe": // Fer
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 527.0f, intensity = element.percentage * 4f });
+                    break;
+
+                case "Si": // Silicium
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 634.7f, intensity = element.percentage * 2f });
+                    break;
+
+                case "Mg": // Magnésium
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 517.3f, intensity = element.percentage * 2f });
+                    break;
+
+                case "Al": // Aluminium
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 396.2f, intensity = element.percentage * 2f });
+                    break;
+
+                case "N": // Azote
+                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 388.4f, intensity = element.percentage * 2f });
+                    break;
+            }
+        }
+
+        return spectrum;
     }
 }

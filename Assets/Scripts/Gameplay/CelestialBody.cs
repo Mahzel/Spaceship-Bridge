@@ -116,7 +116,7 @@ public class CelestialBody : MonoBehaviour
             if (centralBody != null)
             {
                 // Calculer l'anomalie moyenne (augmente linéairement avec le temps)
-                meanAnomaly += (360f / orbitalPeriod) * Time.deltaTime / 10f;
+                meanAnomaly += (360f / orbitalPeriod) * Time.deltaTime / 8760f;
                 if (meanAnomaly >= 360f)
                 {
                     meanAnomaly -= 360f;

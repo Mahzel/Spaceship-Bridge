@@ -389,16 +389,15 @@ public void OnBodySelected()
         }
     }
 
-/// <summary>
-/// Calcule la luminosité dans une direction donnée, avec pondération pour les bords.
-/// </summary>
 private float CalculateDirectionalLuminosity(float azimuth, float elevation)
 {
-    float totalLuminosity = UnityEngine.Random.Range(0f, 0.005f);
+    float totalLuminosity = UnityEngine.Random.Range(-0.005f, 0.005f);
+
+    // Résolution angulaire d'un bloc (en degrés)
+    float blockAngularResolution = fieldOfView / _scanResolution;
 
     // Trier les objets par distance
-    List<CelestialBody> sortedBodies = _celestialBodies.OrderBy(body =>
-        body.distance).ToList();
+    List<CelestialBody> sortedBodies = _celestialBodies.OrderBy(body => body.distance).ToList();
 
     foreach (CelestialBody body in sortedBodies)
     {
@@ -406,26 +405,61 @@ private float CalculateDirectionalLuminosity(float azimuth, float elevation)
 
         // Calculer le rayon angulaire de l'objet
         float angularRadius = body.angularSize;
-        float sigma = angularRadius/50f;
+        float sigma = angularRadius / 50f;
         float bodyAzimuth = body.azimuth;
         float bodyElevation = body.elevation;
-
 
         // Calculer l'angle entre la direction du capteur et l'objet
         float azimuthDiff = Mathf.Abs(azimuth - bodyAzimuth);
         float elevationDiff = Mathf.Abs(elevation - bodyElevation);
 
-        if (azimuthDiff < angularRadius && elevationDiff < angularRadius)
+        // Si l'objet est "dans cette direction" (chevauche le bloc)
+        if (azimuthDiff < angularRadius + blockAngularResolution / 2f &&
+            elevationDiff < angularRadius + blockAngularResolution / 2f)
         {
+            // Calculer la fraction de chevauchement
+            float overlapFraction = CalculateOverlapFraction(
+                azimuthDiff, elevationDiff,
+                angularRadius, blockAngularResolution / 2f);
+
             // Pondération gaussienne pour les objets proches des bords
             float weight = Mathf.Exp(-0.5f * (azimuthDiff * azimuthDiff + elevationDiff * elevationDiff) / (sigma * sigma));
+
+            // Contribution totale = luminosité * fraction de chevauchement * poids gaussien
             float bodyLuminosity = body.apparentLuminosity;
-            totalLuminosity += bodyLuminosity * weight;
-            break;
+            totalLuminosity += bodyLuminosity * overlapFraction * weight;
         }
     }
 
     return NormalizeLuminosity(totalLuminosity);
+}
+
+/// <summary>
+/// Calcule la fraction de chevauchement entre un objet et un bloc.
+/// </summary>
+private float CalculateOverlapFraction(float azimuthDiff, float elevationDiff,
+    float angularRadius, float halfBlockResolution)
+{
+    // Distance normalisée entre le centre de l'objet et le centre du bloc
+    float normalizedAzimuthDiff = azimuthDiff / (angularRadius + halfBlockResolution);
+    float normalizedElevationDiff = elevationDiff / (angularRadius + halfBlockResolution);
+
+    // Calculer la distance normalisée au centre
+    float normalizedDistanceToCenter = Mathf.Sqrt(
+        normalizedAzimuthDiff * normalizedAzimuthDiff +
+        normalizedElevationDiff * normalizedElevationDiff);
+
+    // Si l'objet est complètement dans le bloc
+    if (normalizedDistanceToCenter <= halfBlockResolution / (angularRadius + halfBlockResolution))
+        return 1f;
+
+    // Si l'objet est complètement hors du bloc
+    if (normalizedDistanceToCenter >= 1f)
+        return 0f;
+
+    // Fraction de chevauchement (1 à la frontière, 0 en dehors)
+    float overlapFraction = 1f - normalizedDistanceToCenter;
+    return Mathf.Clamp01(overlapFraction);
 }
 
 
@@ -476,17 +510,8 @@ private float CalculateDirectionalLuminosity(float azimuth, float elevation)
 /// <returns>Luminosité normalisée (0 à 1).</returns>
 private float NormalizeLuminosity(float luminosity)
 {
-    // Ajouter un offset pour garantir que les étoiles faibles soient visibles
-    float minVisibleLuminosity = 0.001f; // Luminosité minimale visible (naines rouges)
-    float adjustedLuminosity = Mathf.Max(luminosity, minVisibleLuminosity);
-
-        if (adjustedLuminosity > 1)
-        {
-            int a = 0;
-        }
-
     // Échelle logarithmique pour compresser les valeurs élevées
-    float logLuminosity = Mathf.Log10(1f + adjustedLuminosity);
+    float logLuminosity = Mathf.Log10(1f + luminosity);
 
     // Normaliser en fonction de maxExpectedLuminosity
     float normalizedLogLuminosity = logLuminosity / Mathf.Log10(1f + maxExpectedLuminosity);
@@ -513,9 +538,9 @@ private IEnumerator ScanRoutine()
     int col = 0;
 
     // Tableau pour stocker les luminosités des blocs adjacents (pour le lissage)
-    int integrator = 0;
+    int integrator = 1;
     int maxIntegrator = 20;
-    float[,,] luminosityGrid = new float[_scanResolution, _scanResolution,maxIntegrator-1];
+    float[,,] luminosityGrid = new float[_scanResolution, _scanResolution,maxIntegrator];
     
     while (_isScanning)
     {
@@ -562,7 +587,7 @@ private IEnumerator ScanRoutine()
                 float elevation = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sy / _scanResolution) + offsetElevation;
                 // Calculer la luminosité dans cette direction
                 float luminosity = CalculateDirectionalLuminosity(azimuth, elevation);
-                luminosityGrid[sx, sy, integrator] = luminosity;
+                luminosityGrid[sx, sy, integrator-1] = luminosity;
                 luminosity = 0;
                 for(int i = 0; i < integrator; i++)
                 {
@@ -589,7 +614,10 @@ private IEnumerator ScanRoutine()
             yield return new WaitForSeconds(updateInterval);
         }
         col++;
-        integrator = Mathf.Min(++integrator,maxIntegrator);
+        if(++integrator > maxIntegrator)
+            {
+                integrator = 1;
+            }
     }
 }
 

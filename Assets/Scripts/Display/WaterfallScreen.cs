@@ -16,7 +16,7 @@ public class WaterfallScreen : ComputerScreen
     public float maxValue = 100f;            // Valeur maximale (100)
     public float updateInterval = 2f;        // Intervalle d'ajout de ligne (5 secondes)
     private int pixelSize = 1;
-    private int integration = 5;
+    private int integration = 20;
     ArrayList integrator;
     int integrationCount = 1;
 
@@ -62,7 +62,7 @@ public class WaterfallScreen : ComputerScreen
         // Génère un bruit de base aléatoire (0 à 20 dB)
         for (int i = 0; i < lineData.Length; i++)
         {
-            baseNoise[i] = Random.Range(0f, 20f);
+            baseNoise[i] = Random.Range(-0.005f, 0.005f);
         }
 
         // Récupère tous les objets du système (étoiles et planètes)
@@ -74,7 +74,7 @@ public class WaterfallScreen : ComputerScreen
         {
             var (azimuth, _, _) = star.GetComponent<CelestialBody>().GetData();
             int index = AzimuthToIndex(azimuth);
-            baseNoise[index] = 60f; // Ajoute 80 dB pour une étoile
+            baseNoise[index] = star.GetComponent<CelestialBody>().apparentLuminosity; // Ajoute 80 dB pour une étoile
         }
 
         // Ajoute le signal des planètes (35 dB)
@@ -82,7 +82,7 @@ public class WaterfallScreen : ComputerScreen
         {
             var (azimuth, _, _) = planet.GetComponent<CelestialBody>().GetData();
             int index = AzimuthToIndex(azimuth);
-            baseNoise[index] = 35f; // Ajoute 35 dB pour une étoile
+            baseNoise[index] = planet.GetComponent<CelestialBody>().apparentLuminosity; // Ajoute 35 dB pour une étoile
         }
         if(integrationToggle.GetComponent<Toggle>().isOn)
         {
@@ -94,12 +94,12 @@ public class WaterfallScreen : ComputerScreen
             integrationCount = 1;       
             lineData = baseNoise;
         }
-        float[] average = SlidingAverage(lineData, 11);
-        float[] stdev = SlidingStdDev(lineData, 7);
+        float[] average = SlidingAverage(lineData, 20, 5);
+        float[] stdev = SlidingStdDev(lineData, 15, 5);
 
         for (int i = 0; i<lineData.Length;i++)
         {
-            lineData[i] = lineData[i]+((lineData[i]-average[i])/stdev[i]);
+            lineData[i] = Mathf.Min(lineData[i]+((lineData[i]-average[i])/stdev[i]),100f);
         }
         // Ajoute la ligne au waterfall
         AddWaterfallLine(lineData);

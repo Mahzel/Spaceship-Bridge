@@ -4,8 +4,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using TMPro;
-using Unity.Hierarchy;
-using System;
 
 /// <summary>
 /// Gère un système de capteur passif pour le projet Spaceship Bridge.
@@ -63,8 +61,8 @@ public class Imager : MonoBehaviour
 
     /// <summary> Référence directe au bouton Zoom. </summary>
     public Button zoomButton;
-    public float offsetAzimuth=0;
-    public float offsetElevation=0;
+    public float offsetAzimuth=0f;
+    public float offsetElevation=0f;
     #endregion
 
     #region Crosshair Settings
@@ -114,6 +112,8 @@ public class Imager : MonoBehaviour
     /// <summary> Liste des objets célestes dans la scène. </summary>
     private List<CelestialBody> _celestialBodies = new List<CelestialBody>();
     private CelestialBody _selectedBody;
+
+    private float dynamicCompressionFactor = 2f;
 
     float maxExpectedLuminosity = 1000f;
     // =========================================================================
@@ -192,7 +192,7 @@ public class Imager : MonoBehaviour
             crosshairImage.sprite = zoomCrosshairSprite;
             if (zoomButton != null)
             {
-                TMP_Text buttonText = zoomButton.GetComponentInChildren<TMP_Text>();
+                TMP_Text buttonText = zoomButton.GetComponent<TMP_Text>();
                 if (buttonText != null)
                 {
                     buttonText.text = "Zoom On";
@@ -207,7 +207,7 @@ public class Imager : MonoBehaviour
             crosshairImage.sprite = normalCrosshairSprite;
             if (zoomButton != null)
             {
-                TMP_Text buttonText = zoomButton.GetComponentInChildren<TMP_Text>();
+                TMP_Text buttonText = zoomButton.GetComponent<TMP_Text>();
                 if (buttonText != null)
                 {
                     buttonText.text = "Zoom Off";
@@ -287,8 +287,6 @@ public void OnBodySelected()
     {
         // Aucune sélection (option par défaut)
         _selectedBody = null;
-        offsetAzimuth = 0f;
-        offsetElevation = 0f;
         return;
     }
 
@@ -356,7 +354,7 @@ public void OnBodySelected()
         if(!_celestialBodies.Contains(bodies.First<CelestialBody>()))
         {
             _celestialBodies.Clear();
-                _celestialBodies.AddRange(bodies);
+            _celestialBodies.AddRange(bodies);
             bodyList.ClearOptions();
             List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
             options.Add(new TMP_Dropdown.OptionData("None"));
@@ -391,7 +389,7 @@ public void OnBodySelected()
 
 private float CalculateDirectionalLuminosity(float azimuth, float elevation)
 {
-    float totalLuminosity = UnityEngine.Random.Range(-0.005f, 0.005f);
+    float totalLuminosity = UnityEngine.Random.Range(0, 0.005f);
 
     // Résolution angulaire d'un bloc (en degrés)
     float blockAngularResolution = fieldOfView / _scanResolution;
@@ -504,21 +502,24 @@ private float CalculateOverlapFraction(float azimuthDiff, float elevationDiff,
         }
     }
 /// <summary>
-/// Normalise la luminosité en utilisant une échelle logarithmique ajustée.
-/// </summary>
-/// <param name="luminosity">Luminosité brute.</param>
-/// <returns>Luminosité normalisée (0 à 1).</returns>
-private float NormalizeLuminosity(float luminosity)
-{
-    // Échelle logarithmique pour compresser les valeurs élevées
-    float logLuminosity = Mathf.Log10(1f + luminosity);
+    /// Normalise la luminosité en utilisant une échelle logarithmique et une compression de dynamique.
+    /// </summary>
+    /// <param name="luminosity">Luminosité brute.</param>
+    /// <returns>Luminosité normalisée (0 à 1).</returns>
+    private float NormalizeLuminosity(float luminosity)
+    {
+        // Appliquer une compression de dynamique
+        float compressedLuminosity = Mathf.Pow(luminosity, 1f / dynamicCompressionFactor);
 
-    // Normaliser en fonction de maxExpectedLuminosity
-    float normalizedLogLuminosity = logLuminosity / Mathf.Log10(1f + maxExpectedLuminosity);
+        // Échelle logarithmique pour compresser les valeurs élevées
+        float logLuminosity = Mathf.Log10(1f + compressedLuminosity);
 
-    // Garantir que les étoiles faibles soient visibles
-    return Mathf.Clamp01(normalizedLogLuminosity * 1.2f); // Augmenter légèrement la plage
-}
+        // Normaliser en fonction de maxExpectedLuminosity
+        float normalizedLogLuminosity = logLuminosity / Mathf.Log10(1f + maxExpectedLuminosity);
+
+        // Garantir que les étoiles faibles soient visibles
+        return Mathf.Clamp01(normalizedLogLuminosity);
+    }
 
 
 
@@ -538,34 +539,13 @@ private IEnumerator ScanRoutine()
     int col = 0;
 
     // Tableau pour stocker les luminosités des blocs adjacents (pour le lissage)
-    int integrator = 1;
+    int integrator = 0;
     int maxIntegrator = 20;
-    float[,,] luminosityGrid = new float[_scanResolution, _scanResolution,maxIntegrator];
+    List<float[,]> integratorGrid = new List<float[,]>();
+    integratorGrid.Add(new float[_scanResolution,_scanResolution]);
     
     while (_isScanning)
     {
-        if (_selectedBody != null)
-        {
-            offsetAzimuth = _selectedBody.azimuth;
-            offsetElevation = _selectedBody.elevation;
-        }
-
-       /* // Balayer chaque bloc du champ de vision
-        for (int sy = 0; sy < _scanResolution; sy++)
-        {
-            for (int sx = 0; sx < _scanResolution; sx++)
-            {
-                // Calculer l'azimuth et l'élévation pour ce bloc
-                float azimuth = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sx / _scanResolution) + offsetAzimuth;
-                float elevation = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sy / _scanResolution) + offsetElevation;
-
-                // Calculer la luminosité dans cette direction
-                float luminosity = CalculateDirectionalLuminosity(azimuth, elevation);
-                luminosityGrid[sx+1, sy+1] = luminosity*sensorGain; // Stocker la luminosité pour le lissage
-            }
-        }*/
-
-        // Appliquer le lissage et dessiner les blocs
         for (int sy = 0; sy < _scanResolution; sy++)
         {
             _currentScanLine = sy * blockSize;
@@ -573,27 +553,23 @@ private IEnumerator ScanRoutine()
             spcr.UpdateSpectrometry();
             for (int sx = 0; sx < _scanResolution; sx++)
             {
-                /*// Lissage : moyenne des luminosités des blocs adjacents
-                float center = luminosityGrid[sx + 1, sy + 1];
-                float top = luminosityGrid[sx + 1, sy];
-                float bottom = luminosityGrid[sx + 1, sy + 2];
-                float left = luminosityGrid[sx, sy + 1];
-                float right = luminosityGrid[sx + 2, sy + 1];
-
-                float smoothedLuminosity = center * 0.6f + (top + bottom + left + right) * 0.1f;*/
-                // Calculer l'azimuth et l'élévation pour ce bloc
                 FindAllCelestialBodies();
+                if (_selectedBody != null)
+                {   
+                    offsetAzimuth = _selectedBody.azimuth;
+                    offsetElevation = _selectedBody.elevation;
+                }
                 float azimuth = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sx / _scanResolution) + offsetAzimuth;
                 float elevation = Mathf.Lerp(-fieldOfView / 2f / _zoomFactor, fieldOfView / 2f / _zoomFactor, (float)sy / _scanResolution) + offsetElevation;
                 // Calculer la luminosité dans cette direction
                 float luminosity = CalculateDirectionalLuminosity(azimuth, elevation);
-                luminosityGrid[sx, sy, integrator-1] = luminosity;
+                integratorGrid[integrator][sx, sy] = luminosity;
                 luminosity = 0;
-                for(int i = 0; i < integrator; i++)
+                for(int i = 0; i< integratorGrid.Count; i++)
                 {
-                    luminosity += luminosityGrid[sx,sy,i];
+                    luminosity += integratorGrid[i][sx,sy];
                 }
-                luminosity/=integrator;
+                luminosity = luminosity / (float)(integrator+1f);
 
                 // Convertir en couleur
                 Color blockColor = GetIntensityColor(luminosity*sensorGain);
@@ -607,17 +583,18 @@ private IEnumerator ScanRoutine()
                 int startY = sy * blockSize;
                 _scannedTexture.SetPixels(startX, startY, blockSize, blockSize, blockColors);
             }
-
-            // Mise à jour progressive de la texture
             DrawScanLine(_currentScanLine, col % 2);
+            // Mise à jour progressive de la texture
             _scannedTexture.Apply();
             yield return new WaitForSeconds(updateInterval);
         }
         col++;
-        if(++integrator > maxIntegrator)
-            {
-                integrator = 1;
-            }
+        if(++integrator > maxIntegrator-1)
+        {
+            integrator = 19;
+            integratorGrid.RemoveAt(0);
+        }
+        integratorGrid.Add(new float[_scanResolution,_scanResolution]);
     }
 }
 

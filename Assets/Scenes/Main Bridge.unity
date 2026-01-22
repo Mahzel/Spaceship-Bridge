@@ -284,7 +284,7 @@ MonoBehaviour:
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
   m_fontSizeMax: 72
-  m_fontStyle: 0
+  m_fontStyle: 1
   m_HorizontalAlignment: 1
   m_VerticalAlignment: 256
   m_textAlignment: 65535
@@ -3579,6 +3579,9 @@ PrefabInstance:
       addedObject: {fileID: 1738161032}
     - targetCorrespondingSourceObject: {fileID: 7239003981226731456, guid: 545aad3b06eb4aa4d8eeee2252c46370, type: 3}
       insertIndex: -1
+      addedObject: {fileID: 1254753591}
+    - targetCorrespondingSourceObject: {fileID: 7239003981226731456, guid: 545aad3b06eb4aa4d8eeee2252c46370, type: 3}
+      insertIndex: -1
       addedObject: {fileID: 1760844425}
     - targetCorrespondingSourceObject: {fileID: 7239003981226731456, guid: 545aad3b06eb4aa4d8eeee2252c46370, type: 3}
       insertIndex: -1
@@ -4489,6 +4492,78 @@ MonoBehaviour:
           m_StringArgument: 
           m_BoolArgument: 0
         m_CallState: 2
+--- !u!1 &1254753590
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1254753591}
+  - component: {fileID: 1254753593}
+  - component: {fileID: 1254753592}
+  m_Layer: 5
+  m_Name: debugOverlay
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1254753591
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1254753590}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1746874077}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0, y: 1}
+  m_AnchorMax: {x: 0, y: 1}
+  m_AnchoredPosition: {x: 25, y: -376.8}
+  m_SizeDelta: {x: 350, y: 350}
+  m_Pivot: {x: 0, y: 0}
+--- !u!114 &1254753592
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1254753590}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1344c3c82d62a2a41a3576d8abb8e3ea, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.RawImage
+  m_Material: {fileID: 0}
+  m_Color: {r: 1, g: 1, b: 1, a: 0.039215688}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Texture: {fileID: 0}
+  m_UVRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+--- !u!222 &1254753593
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1254753590}
+  m_CullTransparentMesh: 1
 --- !u!1 &1259032250
 GameObject:
   m_ObjectHideFlags: 0
@@ -4707,11 +4782,11 @@ RectTransform:
   m_Children: []
   m_Father: {fileID: 1771733637}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 0}
+  m_AnchorMin: {x: 0, y: 0.5}
+  m_AnchorMax: {x: 0, y: 0.5}
+  m_AnchoredPosition: {x: 25, y: 0}
   m_SizeDelta: {x: 350, y: 350}
-  m_Pivot: {x: 0.5, y: 0.5}
+  m_Pivot: {x: 0, y: 0.5}
 --- !u!114 &1392414881
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4974,7 +5049,7 @@ MonoBehaviour:
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
   m_fontSizeMax: 72
-  m_fontStyle: 0
+  m_fontStyle: 1
   m_HorizontalAlignment: 1
   m_VerticalAlignment: 256
   m_textAlignment: 65535
@@ -5740,7 +5815,7 @@ MonoBehaviour:
   display: {fileID: 1738161033}
   playerShip: {fileID: 0}
   star: {fileID: 0}
-  maxScanDistance: 100
+  maxScanDistance: 5000
   fieldOfView: 60
   blockSize: 10
   updateInterval: 0.05
@@ -5753,6 +5828,7 @@ MonoBehaviour:
   zoomButton: {fileID: 1699761118}
   offsetAzimuth: 0
   offsetElevation: 0
+  debugImage: {fileID: 1254753592}
   normalCrosshairSprite: {fileID: 21300000, guid: cec3a4007825e544ea01274cc5ebfaf6, type: 3}
   zoomCrosshairSprite: {fileID: 21300000, guid: 815c1e3154ccf234b83c53babc358654, type: 3}
   crosshairImage: {fileID: 1339214512}
@@ -5927,11 +6003,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Spectrometer
   imager: {fileID: 1746874078}
   spectrumDisplay: {fileID: 1392414881}
-  spectrumWidth: 256
-  spectrumHeight: 64
   wavelengthMin: 380
   wavelengthMax: 780
   curveColor: {r: 0, g: 1, b: 0, a: 1}
+  lineSegmentPrefab: {fileID: 6120831919318529364, guid: fef1426d0759184488ed8a8d934a8a99, type: 3}
 --- !u!1 &1785045689
 GameObject:
   m_ObjectHideFlags: 0
@@ -6213,7 +6288,7 @@ MonoBehaviour:
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
   m_fontSizeMax: 72
-  m_fontStyle: 0
+  m_fontStyle: 1
   m_HorizontalAlignment: 1
   m_VerticalAlignment: 256
   m_textAlignment: 65535

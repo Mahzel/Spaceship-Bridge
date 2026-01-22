@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine.LowLevelPhysics2D;
 
 public class Spectrometer : MonoBehaviour
 {
@@ -10,14 +11,16 @@ public class Spectrometer : MonoBehaviour
     public RawImage spectrumDisplay; // UI RawImage pour afficher le spectre
 
     [Header("Paramètres du Spectromètre")]
-    public int spectrumWidth = 256; // Largeur de la texture du spectre (en pixels)
-    public int spectrumHeight = 64; // Hauteur de la texture (en pixels)
+    private int spectrumWidth = 256; // Largeur de la texture du spectre (en pixels)
+    private int spectrumHeight = 64; // Hauteur de la texture (en pixels)
     public float wavelengthMin = 380f; // Longueur d'onde min (nm)
     public float wavelengthMax = 780f; // Longueur d'onde max (nm)
     public Color curveColor = Color.green; // Couleur de la courbe
+    public GameObject lineSegmentPrefab;
 
     private Texture2D _spectrumTexture;
     private CelestialBody _currentTarget;
+    private List<GameObject> lineSegments;
 
     void Start()
     {
@@ -26,6 +29,7 @@ public class Spectrometer : MonoBehaviour
         spectrumHeight = (int)spectrumDisplay.rectTransform.rect.height;
         _spectrumTexture = new Texture2D(spectrumWidth, spectrumHeight);
         spectrumDisplay.texture = _spectrumTexture;
+        lineSegments = new List<GameObject>();
         ClearSpectrumTexture();
     }
 
@@ -38,6 +42,7 @@ public class Spectrometer : MonoBehaviour
         if ((_currentTarget != null) && imager.isScanning())
         {
             DrawSpectrumCurve(_currentTarget.spectrum);
+            drawDSP(_currentTarget);
             _spectrumTexture.Apply();
         }
         else
@@ -56,7 +61,7 @@ private CelestialBody FindTargetInImagerCenter()
 
     // Calculer la direction ajustée avec les offsets
     Vector3 scanDirection = CalculateAdjustedScanDirection(playerShip, imager.offsetAzimuth, imager.offsetElevation);
-    Debug.DrawRay(playerShip.position, scanDirection*100, Color.red, 0.1f);
+    Debug.DrawRay(playerShip.position, scanDirection*10000, Color.red, 0.1f);
 
 
     RaycastHit hit;
@@ -130,12 +135,12 @@ private Vector3 CalculateAdjustedScanDirection(Transform playerShip, float offse
         int x = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, wavelength) * (spectrumWidth - 1));
 
         // Calculer la hauteur de la raie (0 à spectrumHeight)
-        int height = Mathf.RoundToInt(Mathf.Abs(intensity) * (spectrumHeight - 1));
+        int height = Mathf.RoundToInt(2*Mathf.Log10((Mathf.Abs(intensity) * (spectrumHeight - 1))));
 
         // Dessiner la raie (comme une ligne verticale)
         for (int y = 0; y < height; y++)
         {
-            int yPos = intensity > 0 ? (spectrumHeight - 1 - y) : (spectrumHeight / 2 + y); // Émission vers le haut, absorption vers le bas
+            int yPos = intensity > 0 ? (spectrumHeight/2 + y) : (spectrumHeight/2 - y); // Émission vers le haut, absorption vers le bas
             if (yPos >= 0 && yPos < spectrumHeight)
                 _spectrumTexture.SetPixel(x, yPos, color);
         }
@@ -156,10 +161,63 @@ private Vector3 CalculateAdjustedScanDirection(Transform playerShip, float offse
     {
         // Axe X (longueurs d'onde)
         for (int x = 0; x < spectrumWidth; x++)
-            _spectrumTexture.SetPixel(x, spectrumHeight - 1, Color.white);
+            _spectrumTexture.SetPixel(x, Mathf.RoundToInt(spectrumHeight/2), Color.white);
 
         // Axe Y (centre)
         for (int y = 0; y < spectrumHeight; y++)
             _spectrumTexture.SetPixel(0, y, Color.white);
+    }
+
+    private void drawDSP(CelestialBody target)
+    {
+        float[] dataPoints = new float[spectrumWidth];
+        for(int i = 0; i < spectrumWidth-1;i++)
+        {
+            dataPoints[i] = Random.Range(-1f,1f);
+        }
+        foreach(SpectralLine s in target.spectrum.emissionLines)
+        {
+            int x = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, s.wavelength) * (spectrumWidth - 1));
+            dataPoints[x] += Mathf.Log(s.intensity*100)*5;
+        }
+        foreach(SpectralLine s in target.spectrum.absorptionLines)
+        {
+            int x = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, s.wavelength) * (spectrumWidth - 1));
+            dataPoints[x] -= Mathf.Log(s.intensity*100)*5;
+        }
+        Vector2[] points = new Vector2[spectrumWidth];
+        for (int i = 0; i < spectrumWidth; i++)
+        {
+            float y = Mathf.RoundToInt(dataPoints[i]);
+            points[i] = new Vector2(i, y);
+        }
+
+
+        // Dessine les segments entre les points
+        for (int i = 0; i < points.Length - 1; i++)
+        {
+            GameObject segment;
+            if(lineSegments.Count < points.Length)
+            {
+                segment = Instantiate(lineSegmentPrefab, spectrumDisplay.transform);
+                lineSegments.Add(segment);
+            }
+            else
+            {
+                segment = lineSegments[i];
+            }
+
+            // Configure le RectTransform du segment
+            RectTransform segmentRect = segment.GetComponent<RectTransform>();
+            segmentRect.anchorMin = new Vector2(0,0.5f);
+            segmentRect.anchorMax = new Vector2(0,0.5f);
+            segmentRect.pivot = Vector2.zero;
+
+            // Positionne et étire le segment entre les deux points
+            segmentRect.localPosition = points[i];
+            Vector2 direction = points[i + 1] - points[i];
+            segmentRect.sizeDelta = new Vector2(direction.magnitude, 1f); // Épaisseur de 2px
+            segmentRect.rotation = Quaternion.Euler(0, 0, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
+        }
     }
 }

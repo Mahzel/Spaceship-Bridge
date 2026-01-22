@@ -5,6 +5,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
+using static Utils;
+using System.Linq;
+using UnityEditor.Animations;
 
 public class SystemManager : MonoBehaviour
 {
@@ -23,10 +26,7 @@ public class SystemManager : MonoBehaviour
     private GameObject playerShip;
     public GameObject playerShipPrefab;
 
-    // Constantes pour les conversions d'unités
-    private const float UA_TO_GAME_UNITS = 10f; // 1 UA = 10 unités de jeu
-    private const float SOLAR_RADIUS_IN_UA = 0.00465f; // 1 rayon solaire = 0.00465 UA
-    private const float SOLAR_RADIUS_IN_GAME_UNITS = SOLAR_RADIUS_IN_UA * UA_TO_GAME_UNITS; // 1 rayon solaire = 0.0465 unités de jeu
+
 
     public void Awake()
     {
@@ -507,6 +507,7 @@ string DetermineStarType(float luminosity, float temperature)
 
     // Appliquer la taille à l'étoile
     star.transform.localScale = Vector3.one * starSizeInGameUnits;
+    star.tag = "Star";
 
     // Ajuster la taille du collider de l'étoile
     SphereCollider starCollider = star.GetComponent<SphereCollider>();
@@ -556,8 +557,8 @@ string DetermineStarType(float luminosity, float temperature)
             while (!validOrbit && attempts < 100)
             {
                 attempts++;
-                float orbitalRadiusInUA = Random.Range(minOrbitalDistanceInGameUnits, 10f); // Distance en UA
-                orbitalRadiusInGameUnits = UAToGameUnits(orbitalRadiusInUA);
+                float orbitalRadiusInUA = Random.Range(minOrbitalDistanceInGameUnits/UA_TO_GAME_UNITS, 10f); // Distance en UA
+                orbitalRadiusInGameUnits = orbitalRadiusInUA*UA_TO_GAME_UNITS;
                 planetMass = Random.Range(0.1f, 5f);
                 orbitalWidthInGameUnits = CalculateOrbitalWidth(orbitalRadiusInGameUnits, planetMass, starMass);
 
@@ -581,6 +582,7 @@ string DetermineStarType(float luminosity, float temperature)
 
             // Ajouter cette orbite à la liste
             planetOrbits.Add((orbitalRadiusInGameUnits, orbitalWidthInGameUnits));
+            planetOrbits = planetOrbits.OrderBy(orbit => orbit.radius).ToList();
 
             // Période orbitale en années
             float orbitalPeriodInYears = Mathf.Sqrt(Mathf.Pow(orbitalRadiusInGameUnits / UA_TO_GAME_UNITS, 3));
@@ -597,7 +599,7 @@ string DetermineStarType(float luminosity, float temperature)
             GameObject planet = celestialPool.Get().gameObject;
             planet.transform.position = star.transform.position + orbitalPosition;
             planet.transform.parent = star.transform;
-            planet.name = $"{systemID} A{i + 1}";
+            planet.tag = "Planet";
 
             // Déterminer les propriétés de la planète
             string planetType = DeterminePlanetType(orbitalRadiusInGameUnits / UA_TO_GAME_UNITS, starTemperature);
@@ -627,11 +629,10 @@ string DetermineStarType(float luminosity, float temperature)
             {
                 body = planet.AddComponent<CelestialBody>();
             }
-            body.bodyName = planet.name;
             body.bodyType = planetType;
             body.temperature = planetTemperature;
             body.mass = planetMass;
-            body.distance = orbitalRadiusInGameUnits / UA_TO_GAME_UNITS;
+            body.distance = orbitalRadiusInGameUnits;
             body.density = planetDensity;
             body.radius = planetSizeInGameUnits;
             body.albedo = planetAlbedo;
@@ -647,8 +648,25 @@ string DetermineStarType(float luminosity, float temperature)
             body.orbitalAngle = initialAngle;
         }
 
+        List<CelestialBody> children = new List<CelestialBody>();
+
+        // Parcourt tous les enfants directs
+        foreach (Transform child in star.transform)
+        {
+            children.Add(child.GetComponent<CelestialBody>());
+        }
+        children = children.OrderBy(child => child.orbitalRadius).ToList();
+        for(int i = 0;i<children.Count;i++)
+        {
+            children[i].gameObject.name=star.name+(i+1);
+            children[i].bodyName = children[i].gameObject.name;
+            children[i].transform.SetAsLastSibling();
+        }
+        
+
+
         // Placer le vaisseau du joueur
-        PlacePlayerShip(star.transform, Math.Max(planetOrbits.Count > 0 ? planetOrbits[planetOrbits.Count - 1].radius * 1.01f : minOrbitalDistanceInGameUnits * 2f, starSizeInGameUnits * 2f));
+        PlacePlayerShip(star.transform, Math.Max(planetOrbits.Count > 0 ? planetOrbits[planetOrbits.Count - 1].radius * 1.1f : minOrbitalDistanceInGameUnits * 2f, starSizeInGameUnits * 2f));
     }
 
     void PlacePlayerShip(Transform starTransform, float distance)
@@ -676,6 +694,7 @@ string DetermineStarType(float luminosity, float temperature)
 
             // Orienter le vaisseau vers l'étoile
             playerShip.transform.LookAt(starTransform);
+            playerShip.transform.SetAsLastSibling();
         }
         else
         {

@@ -1,7 +1,7 @@
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using System;
+using static Utils;
 
 public class CelestialBody : MonoBehaviour
 {
@@ -34,9 +34,6 @@ public class CelestialBody : MonoBehaviour
     public float albedo;
     public float phase;
     public float apparentLuminosity;
-
-    // Constante pour la conversion des unités
-    private const float UA_TO_GAME_UNITS = 10f; // 1 UA = 10 unités de jeu
 
     // Variables internes pour le calcul des orbites
     private float meanAnomaly;                // Anomalie moyenne
@@ -157,7 +154,7 @@ public class CelestialBody : MonoBehaviour
                 SetData(a, e, d);
                 phase = 1;
                 apparentLuminosity = CalculateLuminosity(transform, GameObject.FindGameObjectWithTag("PlayerShip").transform);
-                angularSize = (radius / d) * Mathf.Rad2Deg;
+                angularSize = 2*(radius / d) * Mathf.Rad2Deg;
             }
             yield return null;
         }
@@ -187,7 +184,8 @@ public class CelestialBody : MonoBehaviour
     }
 
     // Calcule l'anomalie vraie à partir de l'anomalie excentrique
-    private float CalculateTrueAnomaly(float eccentricAnomaly, float eccentricity)
+    private float 
+    CalculateTrueAnomaly(float eccentricAnomaly, float eccentricity)
     {
         float trueAnomaly = 2 * Mathf.Rad2Deg * Mathf.Atan2(
             Mathf.Sqrt(1 + eccentricity) * Mathf.Sin(Mathf.Deg2Rad * eccentricAnomaly / 2),
@@ -215,10 +213,9 @@ public class CelestialBody : MonoBehaviour
     }
 
     // Calcule la luminosité apparente de l'objet
-    public float CalculateLuminosity(Transform star, Transform observer)
+    public float CalculateLuminosity(Transform body, Transform observer)
     {
-        float phase = CalculatePhase(star, observer);
-        float distanceToObserver = Vector3.Distance(transform.position, observer.position); // Convertir en UA
+        float distanceToObserver = body.gameObject.GetComponent<CelestialBody>().distance/UA_TO_GAME_UNITS;
 
         // Pour les étoiles, la luminosité dépend de leur luminosité intrinsèque et de la distance
         if (starLuminosity > 0)
@@ -228,9 +225,10 @@ public class CelestialBody : MonoBehaviour
         // Pour les planètes, la luminosité dépend de l'albedo, de la phase et de la distance
         else
         {
-            CelestialBody starBody = star.GetComponent<CelestialBody>();
+            CelestialBody starBody = body.gameObject.GetComponentInParent<CelestialBody>();
             if (starBody != null)
             {
+                float phase = CalculatePhase(body, observer);
                 return starBody.starLuminosity * albedo * phase / (distanceToObserver * distanceToObserver);
             }
             else

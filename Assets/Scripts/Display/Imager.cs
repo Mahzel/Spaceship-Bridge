@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using TMPro;
+using static Utils;
 
 /// <summary>
 /// Gère un système de capteur passif pour le projet Spaceship Bridge.
@@ -29,7 +30,7 @@ public class Imager : MonoBehaviour
 
     #region Scan Settings
     /// <summary> Distance maximale de détection (en UA). </summary>
-    public float maxScanDistance = 5000f;
+    public float maxScanDistance = 50000f;
 
     /// <summary> Champ de vision en degrés (horizontal et vertical). </summary>
     public float fieldOfView = 60f;
@@ -63,6 +64,7 @@ public class Imager : MonoBehaviour
     public Button zoomButton;
     public float offsetAzimuth=0f;
     public float offsetElevation=0f;
+    public RawImage debugImage;
     #endregion
 
     #region Crosshair Settings
@@ -114,6 +116,9 @@ public class Imager : MonoBehaviour
     private CelestialBody _selectedBody;
 
     private float dynamicCompressionFactor = 2f;
+    /// <summary> Texture pour l'overlay de debug. </summary>
+    private Texture2D _debugTexture;
+
 
     float maxExpectedLuminosity = 1000f;
     // =========================================================================
@@ -140,10 +145,10 @@ public class Imager : MonoBehaviour
         // Créer la texture du scan
         _scannedTexture = new Texture2D(_displayWidth, _displayHeight);
         display.texture = _scannedTexture;
-
+        _debugTexture = new Texture2D(_displayWidth, _displayHeight);
+        debugImage.texture = _debugTexture;
         // Trouver le vaisseau du joueur
         playerShip = GameObject.FindGameObjectWithTag("PlayerShip").transform;
-
         // Trouver tous les objets célestes dans la scène
         FindAllCelestialBodies();
 
@@ -357,11 +362,12 @@ public void OnBodySelected()
             _celestialBodies.AddRange(bodies);
             bodyList.ClearOptions();
             List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
-            options.Add(new TMP_Dropdown.OptionData("None"));
             foreach (CelestialBody body in _celestialBodies)
             {
                 options.Add(new TMP_Dropdown.OptionData(body.bodyName));
             }
+            options = options.OrderBy(option => option.text).ToList();
+            options.Insert(0,new TMP_Dropdown.OptionData("None"));
             bodyList.options = options;
             bodyList.value = 0;
             OnBodySelected();
@@ -403,7 +409,7 @@ private float CalculateDirectionalLuminosity(float azimuth, float elevation)
 
         // Calculer le rayon angulaire de l'objet
         float angularRadius = body.angularSize;
-        float sigma = angularRadius / 50f;
+        float sigma = angularRadius*1.25f;
         float bodyAzimuth = body.azimuth;
         float bodyElevation = body.elevation;
 
@@ -507,7 +513,7 @@ private float CalculateOverlapFraction(float azimuthDiff, float elevationDiff,
     /// <param name="luminosity">Luminosité brute.</param>
     /// <returns>Luminosité normalisée (0 à 1).</returns>
     private float NormalizeLuminosity(float luminosity)
-    {
+    {/*
         // Appliquer une compression de dynamique
         float compressedLuminosity = Mathf.Pow(luminosity, 1f / dynamicCompressionFactor);
 
@@ -518,8 +524,109 @@ private float CalculateOverlapFraction(float azimuthDiff, float elevationDiff,
         float normalizedLogLuminosity = logLuminosity / Mathf.Log10(1f + maxExpectedLuminosity);
 
         // Garantir que les étoiles faibles soient visibles
-        return Mathf.Clamp01(normalizedLogLuminosity);
+        return Mathf.Clamp01(normalizedLogLuminosity);*/
+        return ApplyCompression(new float[]{luminosity}, 0,dynamicCompressionFactor,maxExpectedLuminosity)[0];
     }
+
+    /// <summary>
+/// Dessine les cercles de debug pour chaque objet céleste.
+/// </summary>
+private void DrawDebugCircles()
+{
+    // Effacer la texture de debug
+    Color[] clearColors = new Color[_debugTexture.width * _debugTexture.height];
+    for (int i = 0; i < clearColors.Length; i++)
+    {
+        clearColors[i] = new Color(0, 0, 0, 0); // Transparent
+    }
+    _debugTexture.SetPixels(clearColors);
+
+    // Dessiner un cercle pour chaque objet céleste
+    foreach (CelestialBody body in _celestialBodies)
+    {
+        if (body.distance > maxScanDistance) continue;
+
+        // Calculer la position de l'objet sur la texture
+        float azimuth = body.azimuth;
+        float elevation = body.elevation;
+
+        // Convertir les angles en coordonnées de texture
+        int centerX = _debugTexture.width / 2;
+        int centerY = _debugTexture.height / 2;
+
+        // Calculer la position relative de l'objet
+        float relX = (azimuth / (fieldOfView / 2f)) * (centerX);
+        float relY = (elevation / (fieldOfView / 2f)) * (centerY);
+
+        int objX = centerX + Mathf.RoundToInt(relX);
+        int objY = centerY + Mathf.RoundToInt(relY);
+
+        // Calculer le rayon du cercle en pixels
+        float angularRadius = CalculateAngularRadiusFromCollider(body.gameObject);
+        float pixelRadius = (angularRadius / fieldOfView ) * _debugTexture.width;
+
+        // Dessiner le cercle
+        DrawCircle(_debugTexture, objX, objY, Mathf.RoundToInt(pixelRadius), new Color(255,0,0,200));
+    }
+
+    _debugTexture.Apply();
+}
+
+/// <summary>
+/// Dessine un cercle sur une texture.
+/// </summary>
+/// <param name="texture">Texture sur laquelle dessiner.</param>
+/// <param name="centerX">Position X du centre du cercle.</param>
+/// <param name="centerY">Position Y du centre du cercle.</param>
+/// <param name="radius">Rayon du cercle en pixels.</param>
+/// <param name="color">Couleur du cercle.</param>
+private void DrawCircle(Texture2D texture, int centerX, int centerY, int radius, Color color)
+{
+    int radiusSquared = radius * radius;
+
+    int startX = Mathf.Max(0, centerX - radius);
+    int endX = Mathf.Min(texture.width, centerX + radius);
+    int startY = Mathf.Max(0, centerY - radius);
+    int endY = Mathf.Min(texture.height, centerY + radius);
+
+    for (int y = startY; y < endY; y++)
+    {
+        for (int x = startX; x < endX; x++)
+        {
+            int dx = x - centerX;
+            int dy = y - centerY;
+            if (dx * dx + dy * dy <= radiusSquared)
+            {
+                texture.SetPixel(x, y, color);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Calcule le rayon angulaire de l'objet à partir de son collider.
+/// </summary>
+/// <param name="observerPosition">Position de l'observateur (ex: vaisseau).</param>
+/// <returns>Rayon angulaire en degrés.</returns>
+public float CalculateAngularRadiusFromCollider(GameObject target)
+{
+    // Obtenir le rayon du collider (supposons que c'est un SphereCollider)
+    SphereCollider collider = target.GetComponent<SphereCollider>();
+    if (collider == null)
+    {
+        Debug.LogError("Pas de SphereCollider sur cet objet !");
+        return 0f;
+    }
+
+    float objectRadius = collider.radius * transform.lossyScale.x; // Rayon en unités Unity
+    float distance = Vector3.Distance(transform.position, playerShip.position);
+
+    // Calculer le rayon angulaire
+    float angularRadius = Mathf.Atan2(objectRadius, distance) * Mathf.Rad2Deg;
+    return angularRadius;
+}
+
+
 
 
 
@@ -586,6 +693,7 @@ private IEnumerator ScanRoutine()
             DrawScanLine(_currentScanLine, col % 2);
             // Mise à jour progressive de la texture
             _scannedTexture.Apply();
+            DrawDebugCircles();
             yield return new WaitForSeconds(updateInterval);
         }
         col++;

@@ -1,10 +1,15 @@
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using static Utils;
 
 public class CelestialBody : MonoBehaviour
 {
+    #region Constants
+    private const float SOLAR_RADIUS_IN_AU = 0.00465f; // 1 rayon solaire = 0.00465 UA
+    private const float UA_TO_GAME_UNITS = 100f; // 1 UA = 100 unités de jeu
+    #endregion
+
+    #region Public Fields
     // Coordonnées sphériques
     public float azimuth;   // Azimut (en degrés)
     public float elevation; // Élévation (en degrés)
@@ -18,7 +23,7 @@ public class CelestialBody : MonoBehaviour
     public float mass;        // Masse de l'objet
     public float radius;      // Rayon de l'objet (en unités de jeu)
     public float density;
-    public float solRadius;
+    public float solRadius;   // Rayon en rayons solaires
     public float starLuminosity = 0; // 0 pour les planètes, appliqué aux étoiles
     public List<ChemicalComposition> chemicalComposition; // Composition chimique de l'astre
     public Spectrum spectrum; // Spectre d'émission/absorption de l'astre
@@ -34,26 +39,33 @@ public class CelestialBody : MonoBehaviour
     public float albedo;
     public float phase;
     public float apparentLuminosity;
+    #endregion
 
-    // Variables internes pour le calcul des orbites
+    #region Private Fields
     private float meanAnomaly;                // Anomalie moyenne
     private float currentOrbitalAngle;        // Angle orbital actuel
+    #endregion
 
+    #region Unity Methods
     void Start()
     {
         StartCoroutine(Orbit());
+        StartCoroutine(UpdateData());
     }
 
     void OnEnable()
     {
         StartCoroutine(Orbit());
+        StartCoroutine(UpdateData());
     }
 
     void OnDisable()
     {
         StopAllCoroutines();
     }
+    #endregion
 
+    #region Data Management
     // Initialise les valeurs
     public void SetData(float az, float el, float dist)
     {
@@ -66,7 +78,9 @@ public class CelestialBody : MonoBehaviour
     {
         return (azimuth, elevation, distance);
     }
+    #endregion
 
+    #region Position Calculations
     // Calcule les données de position
     private (float azimuth, float elevation, float distance) CalculatePositionData()
     {
@@ -90,17 +104,19 @@ public class CelestialBody : MonoBehaviour
         relativePositionXZ.y = 0;
 
         // Distance
-        float distance = relativePosition.magnitude;
+        float dist = relativePosition.magnitude;
 
         // Azimut relatif (angle entre la direction du vaisseau et la position de l'objet)
-        float azimuth = Vector3.SignedAngle(shipForward, relativePositionXZ, Vector3.up);
+        float az = Vector3.SignedAngle(shipForward, relativePositionXZ, Vector3.up);
 
         // Élévation (angle vertical)
-        float elevation = Mathf.Atan2(relativePosition.y, relativePositionXZ.magnitude) * Mathf.Rad2Deg;
+        float el = Mathf.Atan2(relativePosition.y, relativePositionXZ.magnitude) * Mathf.Rad2Deg;
 
-        return (azimuth, -elevation, distance);
+        return (az, -el, dist);
     }
+    #endregion
 
+    #region Orbital Mechanics
     // Simule l'orbite
     IEnumerator Orbit()
     {
@@ -109,7 +125,9 @@ public class CelestialBody : MonoBehaviour
             if (GameObject.FindGameObjectWithTag("PlayerShip") == null)
             {
                 yield return null;
+                continue;
             }
+
             if (centralBody != null)
             {
                 // Calculer l'anomalie moyenne (augmente linéairement avec le temps)
@@ -154,7 +172,7 @@ public class CelestialBody : MonoBehaviour
                 SetData(a, e, d);
                 phase = 1;
                 apparentLuminosity = CalculateLuminosity(transform, GameObject.FindGameObjectWithTag("PlayerShip").transform);
-                angularSize = 2*(radius / d) * Mathf.Rad2Deg;
+                angularSize = 2 * (radius / d) * Mathf.Rad2Deg;
             }
             yield return null;
         }
@@ -184,8 +202,7 @@ public class CelestialBody : MonoBehaviour
     }
 
     // Calcule l'anomalie vraie à partir de l'anomalie excentrique
-    private float 
-    CalculateTrueAnomaly(float eccentricAnomaly, float eccentricity)
+    private float CalculateTrueAnomaly(float eccentricAnomaly, float eccentricity)
     {
         float trueAnomaly = 2 * Mathf.Rad2Deg * Mathf.Atan2(
             Mathf.Sqrt(1 + eccentricity) * Mathf.Sin(Mathf.Deg2Rad * eccentricAnomaly / 2),
@@ -193,7 +210,9 @@ public class CelestialBody : MonoBehaviour
         );
         return trueAnomaly;
     }
+    #endregion
 
+    #region Luminosity and Phase Calculations
     // Calcule la phase de l'objet (0 = nouvelle phase, 1 = pleine phase)
     public float CalculatePhase(Transform star, Transform observer)
     {
@@ -215,7 +234,7 @@ public class CelestialBody : MonoBehaviour
     // Calcule la luminosité apparente de l'objet
     public float CalculateLuminosity(Transform body, Transform observer)
     {
-        float distanceToObserver = body.gameObject.GetComponent<CelestialBody>().distance/UA_TO_GAME_UNITS;
+        float distanceToObserver = body.gameObject.GetComponent<CelestialBody>().distance / UA_TO_GAME_UNITS;
 
         // Pour les étoiles, la luminosité dépend de leur luminosité intrinsèque et de la distance
         if (starLuminosity > 0)
@@ -237,4 +256,18 @@ public class CelestialBody : MonoBehaviour
             }
         }
     }
+    #endregion
+
+    #region Data Update
+    // Met à jour les données de position
+    IEnumerator UpdateData()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(0.1f);
+            (float a, float e, float d) = CalculatePositionData();
+            SetData(a, e, d);
+        }
+    }
+    #endregion
 }

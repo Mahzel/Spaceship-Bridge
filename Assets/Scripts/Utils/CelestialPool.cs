@@ -6,12 +6,15 @@ public class ObjectPool<T> where T : Component
     private Stack<T> pool;
     private T prefab;
     private Transform parent;
+    private int maxSize = 100;
+    private int totalCreated = 0;
 
     public ObjectPool(T prefab, int initialSize, Transform parent = null)
     {
         this.prefab = prefab;
         this.parent = parent;
         pool = new Stack<T>(initialSize);
+        totalCreated = initialSize;
 
         // Initialiser le pool avec des objets désactivés
         for (int i = 0; i < initialSize; i++)
@@ -30,10 +33,15 @@ public class ObjectPool<T> where T : Component
         {
             obj = pool.Pop();
         }
+        else if (totalCreated < maxSize) // Add limit
+        {
+            obj = GameObject.Instantiate(prefab, parent);
+            totalCreated++;
+        }
         else
         {
-            // Si le pool est vide, créer un nouvel objet
-            obj = GameObject.Instantiate(prefab, parent);
+            Debug.LogWarning("Pool at maximum capacity");
+            return null;
         }
         obj.gameObject.SetActive(true);
         return obj;

@@ -38,7 +38,8 @@ public abstract class ComputerScreen : MonoBehaviour
 
         for (int i = 0; i < buttons.Length; i++)
         {
-            buttons[i].onClick.AddListener(() => OnButtonClick(i));
+            int index = i; // Capture locale pour éviter le bug de closure
+            buttons[i].onClick.AddListener(() => OnButtonClick(index));
         }
     }
 }

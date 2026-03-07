@@ -17,35 +17,44 @@ public class DSPGraph : MonoBehaviour
         ClearGraph();
 
         float graphHeight = graphContainer.rect.height;
-        float graphWidth = graphContainer.rect.width;
-        dataPoints = (int)(graphWidth)/pixelSize;
+        float graphWidth  = graphContainer.rect.width;
 
-        // Crée les points de la courbe
+        // Utiliser la taille réelle de dspData comme source de vérité,
+        // en la plafonnant au nombre de points que le conteneur peut afficher.
+        int maxDisplayPoints = Mathf.Max(1, (int)(graphWidth) / pixelSize);
+        dataPoints = Mathf.Min(dspData.Length, maxDisplayPoints);
+
+        if (dataPoints < 2) return;
+
         Vector2[] points = new Vector2[dataPoints];
+
+        // Normalisation dynamique : on utilise le max réel plutôt qu'une constante
+        float maxVal = 0f;
+        for (int i = 0; i < dataPoints; i++)
+            maxVal = Mathf.Max(maxVal, Mathf.Abs(dspData[i]));
+        if (maxVal < 1e-9f) maxVal = 1f; // guard : données nulles
+
         for (int i = 0; i < dataPoints; i++)
         {
             float x = (float)i / (dataPoints - 1) * graphWidth;
-            float y = (dspData[i] / maxValue) * graphHeight;
+            float y = (dspData[i] / maxVal) * graphHeight;
             points[i] = new Vector2(x, y);
         }
 
-        // Dessine les segments entre les points
         for (int i = 0; i < points.Length - 1; i++)
         {
             GameObject segment = Instantiate(lineSegmentPrefab, graphContainer);
             lineSegments.Add(segment);
 
-            // Configure le RectTransform du segment
             RectTransform segmentRect = segment.GetComponent<RectTransform>();
             segmentRect.anchorMin = Vector2.zero;
             segmentRect.anchorMax = Vector2.zero;
-            segmentRect.pivot = Vector2.zero;
+            segmentRect.pivot     = Vector2.zero;
 
-            // Positionne et étire le segment entre les deux points
             segmentRect.localPosition = points[i];
             Vector2 direction = points[i + 1] - points[i];
-            segmentRect.sizeDelta = new Vector2(direction.magnitude, 1f); // Épaisseur de 2px
-            segmentRect.rotation = Quaternion.Euler(0, 0, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
+            segmentRect.sizeDelta = new Vector2(direction.magnitude, 1f);
+            segmentRect.rotation  = Quaternion.Euler(0, 0, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
         }
     }
 

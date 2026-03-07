@@ -137,11 +137,16 @@ public class SystemManager : MonoBehaviour
     private Vector3 CalculateOrbitalPosition(float radius, float inclination, float eccentricity, float angle)
     {
         float trueAnomaly = angle;
-        float radialDistance = radius * (1 - eccentricity * eccentricity) / (1 + eccentricity * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly));
+        float radialDistance = radius * (1 - eccentricity * eccentricity)
+                             / (1 + eccentricity * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly));
 
-        float x = radialDistance * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly);
-        float z = radialDistance * Mathf.Sin(Mathf.Deg2Rad * trueAnomaly);
-        float y = radialDistance * Mathf.Sin(Mathf.Deg2Rad * inclination) * Mathf.Sin(Mathf.Deg2Rad * trueAnomaly);
+        float x     = radialDistance * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly);
+        float zFlat = radialDistance * Mathf.Sin(Mathf.Deg2Rad * trueAnomaly);
+
+        // Rotation autour de l'axe X pour appliquer l'inclinaison
+        float incRad = Mathf.Deg2Rad * inclination;
+        float y = zFlat * Mathf.Sin(incRad);
+        float z = zFlat * Mathf.Cos(incRad);
 
         return new Vector3(x, y, z);
     }
@@ -169,10 +174,16 @@ public class SystemManager : MonoBehaviour
         }
     }
 
-    // Calcule la température de la planète en fonction de sa distance à l'étoile et de la température de l'étoile
-    private float DetermineTemperature(float orbitalRadiusInUA, float starTemperature)
+    // Calcule la température d'équilibre radiatif de la planète.
+    // Formule : T = 278 * L^0.25 * (1 - albedo)^0.25 / sqrt(d)
+    // avec L en luminosités solaires et d en UA.
+    private float DetermineTemperature(float orbitalRadiusInUA, float starLuminosity, float albedo)
     {
-        float temperature = starTemperature / Mathf.Sqrt(orbitalRadiusInUA);
+        if (orbitalRadiusInUA <= 0f) return 50f;
+        float temperature = 278f
+            * Mathf.Pow(starLuminosity, 0.25f)
+            * Mathf.Pow(Mathf.Max(0f, 1f - albedo), 0.25f)
+            / Mathf.Sqrt(orbitalRadiusInUA);
         return Mathf.Clamp(temperature, 50f, 5000f);
     }
 
@@ -594,6 +605,11 @@ public class SystemManager : MonoBehaviour
         }
 
         ClearCurrentSystem();
+        // Si le vaisseau du joueur n'existe pas encore, l'instancier
+        if (playerShip == null && playerShipPrefab != null)
+        {
+            playerShip = Instantiate(playerShipPrefab);
+        }
 
         int idSeed = HashIDToSeed(systemID);
         int finalSeed = baseSeed + idSeed;
@@ -604,6 +620,7 @@ public class SystemManager : MonoBehaviour
         // Générer une étoile au centre
         Vector3 starPosition = Vector3.zero;
         GameObject star = celestialPool.Get().gameObject;
+        star.GetComponent<CelestialBody>()?.Reset();
         star.transform.position = starPosition;
         star.name = $"{systemID} A";
 
@@ -697,8 +714,8 @@ public class SystemManager : MonoBehaviour
             planetOrbits.Add((orbitalRadiusInGameUnits, orbitalWidthInGameUnits));
             planetOrbits = planetOrbits.OrderBy(orbit => orbit.radius).ToList();
 
-            // Période orbitale en années
-            float orbitalPeriodInYears = Mathf.Sqrt(Mathf.Pow(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, 3));
+            // Période orbitale via la 3e loi de Kepler généralisée : T² = a³ / M_star (unités solaires)
+            float orbitalPeriodInYears = Mathf.Sqrt(Mathf.Pow(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, 3f) / starMass);
             float orbitalPeriodInGameSeconds = YearsToGameSeconds(orbitalPeriodInYears);
 
             float orbitalInclination = Random.Range(-15f, 15f);
@@ -710,17 +727,17 @@ public class SystemManager : MonoBehaviour
 
             // Récupérer une planète depuis le pool
             GameObject planet = celestialPool.Get().gameObject;
+            planet.GetComponent<CelestialBody>()?.Reset();
             planet.transform.position = star.transform.position + orbitalPosition;
             planet.transform.parent = star.transform;
             planet.tag = "Planet";
 
-            // Déterminer les propriétés de la planète
             string planetType = DeterminePlanetType(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, starTemperature);
-            float planetTemperature = DetermineTemperature(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, starTemperature);
+            float planetAlbedo = GenerateAlbedo(planetType);
+            float planetTemperature = DetermineTemperature(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, starLuminosity, planetAlbedo);
             float planetDensity = DetermineDensity(planetType);
             float planetSizeInSolarRadii = DetermineNormalizedSize(planetType, planetMass);
             float planetSizeInGameUnits = SolarRadiusToGameUnits(planetSizeInSolarRadii);
-            float planetAlbedo = GenerateAlbedo(planetType);
 
             // Appliquer la taille à l'objet (scale)
             planet.transform.localScale = Vector3.one * planetSizeInGameUnits;
@@ -782,12 +799,6 @@ public class SystemManager : MonoBehaviour
 
     private void PlacePlayerShip(Transform starTransform, float distance)
     {
-        // Si le vaisseau du joueur n'existe pas encore, l'instancier
-        if (playerShip == null && playerShipPrefab != null)
-        {
-            playerShip = Instantiate(playerShipPrefab);
-        }
-
         // Positionner le vaisseau du joueur
         if (playerShip != null)
         {
@@ -829,23 +840,30 @@ public class SystemManager : MonoBehaviour
     #region System Cleanup
     private void ClearCurrentSystem()
     {
-        // Désactiver tous les enfants (étoiles et planètes)
+        // Snapshot des enfants pour éviter de modifier la collection pendant l'itération
+        List<Transform> children = new List<Transform>();
         foreach (Transform child in transform)
+            children.Add(child);
+
+        foreach (Transform child in children)
         {
             if (playerShip != null)
-            {
                 playerShip.transform.parent = transform;
-            }
-            if (!(child.CompareTag("PlayerShip")) && child.gameObject.activeInHierarchy)
+
+            if (!child.CompareTag("PlayerShip") && child.gameObject.activeInHierarchy)
             {
-                while (child.childCount > 0)
+                // Snapshot des sous-enfants
+                List<Transform> subChildren = new List<Transform>();
+                foreach (Transform subchild in child)
+                    subChildren.Add(subchild);
+
+                foreach (Transform subchild in subChildren)
                 {
-                    foreach (Transform subchild in child)
-                    {
-                        subchild.parent = transform;
-                        celestialPool.ReturnToPool(subchild);
-                    }
+                    subchild.parent = transform;
+                    subchild.GetComponent<CelestialBody>()?.Reset();
+                    celestialPool.ReturnToPool(subchild);
                 }
+                child.GetComponent<CelestialBody>()?.Reset();
                 celestialPool.ReturnToPool(child);
             }
         }

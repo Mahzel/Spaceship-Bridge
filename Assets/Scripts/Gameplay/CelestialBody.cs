@@ -44,17 +44,13 @@ public class CelestialBody : MonoBehaviour
     #region Private Fields
     private float meanAnomaly;                // Anomalie moyenne
     private float currentOrbitalAngle;        // Angle orbital actuel
+    private Transform playerShip;
     #endregion
 
     #region Unity Methods
-    void Start()
-    {
-        StartCoroutine(Orbit());
-        StartCoroutine(UpdateData());
-    }
-
     void OnEnable()
     {
+        playerShip = GameObject.FindGameObjectWithTag("PlayerShip").transform;
         StartCoroutine(Orbit());
         StartCoroutine(UpdateData());
     }
@@ -84,7 +80,6 @@ public class CelestialBody : MonoBehaviour
     // Calcule les données de position
     private (float azimuth, float elevation, float distance) CalculatePositionData()
     {
-        GameObject playerShip = GameObject.FindGameObjectWithTag("PlayerShip");
         if (playerShip == null)
         {
             Debug.LogError("PlayerShip non trouvé !");
@@ -92,10 +87,10 @@ public class CelestialBody : MonoBehaviour
         }
 
         // Position relative de l'objet par rapport au vaisseau
-        Vector3 relativePosition = transform.position - playerShip.transform.position;
+        Vector3 relativePosition = transform.position - playerShip.position;
 
         // Direction vers laquelle le vaisseau fait face (axe "forward")
-        Vector3 shipForward = playerShip.transform.forward;
+        Vector3 shipForward = playerShip.forward;
         shipForward.y = 0; // On ignore l'inclinaison verticale pour l'azimut
         shipForward.Normalize();
 
@@ -122,7 +117,7 @@ public class CelestialBody : MonoBehaviour
     {
         while (true)
         {
-            if (GameObject.FindGameObjectWithTag("PlayerShip") == null)
+            if (playerShip == null)
             {
                 yield return null;
                 continue;
@@ -147,12 +142,14 @@ public class CelestialBody : MonoBehaviour
                 float radialDistance = orbitalRadius * (1 - orbitalEccentricity * orbitalEccentricity) /
                                       (1 + orbitalEccentricity * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly));
 
-                // Position dans le plan orbital
+                // Position dans le plan orbital (avant inclinaison)
                 float x = radialDistance * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly);
-                float z = radialDistance * Mathf.Sin(Mathf.Deg2Rad * trueAnomaly);
+                float zFlat = radialDistance * Mathf.Sin(Mathf.Deg2Rad * trueAnomaly);
 
-                // Appliquer l'inclinaison orbitale
-                float y = radialDistance * Mathf.Sin(Mathf.Deg2Rad * orbitalInclination) * Mathf.Sin(Mathf.Deg2Rad * trueAnomaly);
+                // Rotation du plan orbital autour de l'axe X pour appliquer l'inclinaison
+                float incRad = Mathf.Deg2Rad * orbitalInclination;
+                float y = zFlat * Mathf.Sin(incRad);
+                float z = zFlat * Mathf.Cos(incRad);
 
                 // Position finale
                 Vector3 orbitalPosition = new Vector3(x, y, z);
@@ -163,98 +160,115 @@ public class CelestialBody : MonoBehaviour
                 (float a, float e, float d) = CalculatePositionData();
                 SetData(a, e, d);
                 angularSize = Mathf.Atan2(radius, distance) * Mathf.Rad2Deg;
-                phase = CalculatePhase(centralBody, GameObject.FindGameObjectWithTag("PlayerShip").transform);
-                apparentLuminosity = CalculateLuminosity(centralBody, GameObject.FindGameObjectWithTag("PlayerShip").transform);
+                phase = CalculatePhase(centralBody, playerShip);
+                apparentLuminosity = CalculateLuminosity(centralBody, playerShip);
             }
             else
             {
                 (float a, float e, float d) = CalculatePositionData();
                 SetData(a, e, d);
                 phase = 1;
-                apparentLuminosity = CalculateLuminosity(transform, GameObject.FindGameObjectWithTag("PlayerShip").transform);
-                angularSize = 2 * (radius / d) * Mathf.Rad2Deg;
+                apparentLuminosity = CalculateLuminosity(transform, playerShip);
+                angularSize = Mathf.Atan2(radius, distance) * Mathf.Rad2Deg;
             }
             yield return null;
         }
     }
 
-    // Calcule l'anomalie excentrique à partir de l'anomalie moyenne (méthode de Newton-Raphson)
-    private float CalculateEccentricAnomaly(float meanAnomaly, float eccentricity)
+    // Calcule l'anomalie excentrique à partir de l'anomalie moyenne (méthode de Newton-Raphson).
+    // Tout est traité en radians pour respecter l'équation de Kepler : E - e*sin(E) = M
+    private float CalculateEccentricAnomaly(float meanAnomalyDeg, float eccentricity)
     {
-        float eccentricAnomaly = meanAnomaly;
-        float tolerance = 0.001f;
-        int maxIterations = 100;
-        int iterations = 0;
+        float M = meanAnomalyDeg * Mathf.Deg2Rad; // Conversion initiale en radians
+        float E = M;                               // Valeur initiale
+        float tolerance = 1e-6f;
 
-        while (iterations < maxIterations)
+        for (int i = 0; i < 100; i++)
         {
-            float delta = eccentricAnomaly - eccentricity * Mathf.Sin(Mathf.Deg2Rad * eccentricAnomaly) - meanAnomaly;
-            if (Mathf.Abs(delta) < tolerance)
-            {
-                break;
-            }
-            float derivative = 1 - eccentricity * Mathf.Cos(Mathf.Deg2Rad * eccentricAnomaly);
-            eccentricAnomaly -= delta / derivative;
-            iterations++;
+            float delta = E - eccentricity * Mathf.Sin(E) - M;
+            if (Mathf.Abs(delta) < tolerance) break;
+            float derivative = 1f - eccentricity * Mathf.Cos(E);
+            E -= delta / derivative;
         }
 
-        return eccentricAnomaly;
+        return E; // Retourne en radians
     }
 
-    // Calcule l'anomalie vraie à partir de l'anomalie excentrique
-    private float CalculateTrueAnomaly(float eccentricAnomaly, float eccentricity)
+    // Calcule l'anomalie vraie à partir de l'anomalie excentrique (reçoit en radians, retourne en degrés)
+    private float CalculateTrueAnomaly(float eccentricAnomalyRad, float eccentricity)
     {
-        float trueAnomaly = 2 * Mathf.Rad2Deg * Mathf.Atan2(
-            Mathf.Sqrt(1 + eccentricity) * Mathf.Sin(Mathf.Deg2Rad * eccentricAnomaly / 2),
-            Mathf.Sqrt(1 - eccentricity) * Mathf.Cos(Mathf.Deg2Rad * eccentricAnomaly / 2)
+        float trueAnomaly = 2f * Mathf.Atan2(
+            Mathf.Sqrt(1f + eccentricity) * Mathf.Sin(eccentricAnomalyRad / 2f),
+            Mathf.Sqrt(1f - eccentricity) * Mathf.Cos(eccentricAnomalyRad / 2f)
         );
-        return trueAnomaly;
+        return trueAnomaly * Mathf.Rad2Deg; // Retourne en degrés pour le reste du pipeline
     }
     #endregion
 
     #region Luminosity and Phase Calculations
-    // Calcule la phase de l'objet (0 = nouvelle phase, 1 = pleine phase)
+    // Calcule la phase de l'objet selon la loi de Lambert
+    // (0 = nouvelle phase / côté nuit, 1 = pleine phase / pleine lune)
     public float CalculatePhase(Transform star, Transform observer)
     {
-        // Les étoiles ont toujours une phase de 1 (pleine luminosité)
-        if (starLuminosity > 0)
-        {
-            return 1f;
-        }
+        if (starLuminosity > 0) return 1f; // Les étoiles sont toujours en pleine phase
 
-        // Calculer la phase pour les planètes
-        Vector3 toStar = (star.position - transform.position).normalized;
+        Vector3 toStar     = (star.position     - transform.position).normalized;
         Vector3 toObserver = (observer.position - transform.position).normalized;
-        float phaseAngle = Vector3.Angle(toStar, toObserver);
+        float alpha = Vector3.Angle(toStar, toObserver) * Mathf.Deg2Rad; // Angle de phase en radians
 
-        // Normaliser la phase (1 = pleine phase, 0 = nouvelle phase)
-        return 1 - Mathf.Clamp01(phaseAngle / 180f);
+        // Fonction de phase de Lambert : (sin(α) + (π - α)*cos(α)) / π
+        float lambertPhase = (Mathf.Sin(alpha) + (Mathf.PI - alpha) * Mathf.Cos(alpha)) / Mathf.PI;
+        return Mathf.Clamp01(lambertPhase);
     }
 
     // Calcule la luminosité apparente de l'objet
     public float CalculateLuminosity(Transform body, Transform observer)
     {
-        float distanceToObserver = body.gameObject.GetComponent<CelestialBody>().distance / UA_TO_GAME_UNITS;
+        float distanceToObserver = this.distance / UA_TO_GAME_UNITS;
+        if (distanceToObserver <= 0f) return 0f;
 
-        // Pour les étoiles, la luminosité dépend de leur luminosité intrinsèque et de la distance
+        // Pour les étoiles : L_app = L_intrinseque / d²
         if (starLuminosity > 0)
         {
             return starLuminosity / (distanceToObserver * distanceToObserver);
         }
-        // Pour les planètes, la luminosité dépend de l'albedo, de la phase et de la distance
+        // Pour les planètes : flux reçu de l'étoile * albedo * phase * section / d_observateur²
         else
         {
             CelestialBody starBody = body.gameObject.GetComponentInParent<CelestialBody>();
             if (starBody != null)
             {
+                // Distance étoile → planète en UA
+                float distStarToPlanet = Vector3.Distance(transform.position, body.position) / UA_TO_GAME_UNITS;
+                if (distStarToPlanet <= 0f) return 0f;
+
+                // Flux solaire reçu par la planète
+                float fluxAtPlanet = starBody.starLuminosity / (distStarToPlanet * distStarToPlanet);
+
+                // Luminosité réfléchie vers l'observateur
                 float phase = CalculatePhase(body, observer);
-                return starBody.starLuminosity * albedo * phase / (distanceToObserver * distanceToObserver);
+                float radiusInUA = radius / UA_TO_GAME_UNITS;
+                return fluxAtPlanet * albedo * phase * (radiusInUA * radiusInUA)
+                       / (distanceToObserver * distanceToObserver);
             }
             else
             {
                 return 0f;
             }
         }
+    }
+
+    // Réinitialise l'état orbital (à appeler lors de la réutilisation depuis le pool)
+    public void Reset()
+    {
+        meanAnomaly = 0f;
+        currentOrbitalAngle = 0f;
+        azimuth = 0f;
+        elevation = 0f;
+        distance = 0f;
+        angularSize = 0f;
+        phase = 0f;
+        apparentLuminosity = 0f;
     }
     #endregion
 

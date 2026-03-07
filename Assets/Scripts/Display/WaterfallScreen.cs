@@ -40,7 +40,7 @@ public class WaterfallScreen : ComputerScreen
         while (true)
         {
             yield return new WaitForSeconds(updateInterval);
-            pixelSize = (int)transform.Find("Slider").GetComponent<Slider>().value;
+            pixelSize = (int)sizeSlider.GetComponent<Slider>().value;
             pointCount = (int)(waterfallContainer.rect.width)/pixelSize;
             lineCount = (int)(waterfallContainer.rect.height)/pixelSize;
             GenerateRandomLine();
@@ -54,58 +54,90 @@ public class WaterfallScreen : ComputerScreen
         ClearWaterfall();
     }
 
-    // Génère une ligne aléatoire pour le waterfall
+    // Génère une ligne pour le waterfall
     public void GenerateRandomLine()
     {
-        float[] lineData = new float[pointCount]; // 36 points (0° à 360° par pas de 10°)
-        float[] baseNoise = new float[pointCount]; // Bruit de base aléatoire
+        float[] baseNoise = new float[pointCount];
 
-        // Génère un bruit de base aléatoire (0 à 20 dB)
-        for (int i = 0; i < lineData.Length; i++)
+        // Bruit de fond gaussien (distribution plus réaliste que uniforme)
+        for (int i = 0; i < baseNoise.Length; i++)
         {
-            baseNoise[i] = Random.Range(-0.005f, 0.005f);
+            baseNoise[i] = GaussianNoise(0f, 0.002f);
         }
 
         // Récupère tous les objets du système (étoiles et planètes)
-        GameObject[] stars = GameObject.FindGameObjectsWithTag("Star");
+        GameObject[] stars   = GameObject.FindGameObjectsWithTag("Star");
         GameObject[] planets = GameObject.FindGameObjectsWithTag("Planet");
 
-        // Ajoute le signal des étoiles (80 dB)
+        // Ajoute le signal des corps célestes avec étalement angulaire gaussien (±2 bins)
         foreach (GameObject star in stars)
         {
             var (azimuth, _, _) = star.GetComponent<CelestialBody>().GetData();
-            int index = AzimuthToIndex(azimuth);
-            baseNoise[index] = star.GetComponent<CelestialBody>().apparentLuminosity; // Ajoute 80 dB pour une étoile
+            float signal = star.GetComponent<CelestialBody>().apparentLuminosity;
+            SpreadSignal(baseNoise, azimuth, signal);
         }
-
-        // Ajoute le signal des planètes (35 dB)
         foreach (GameObject planet in planets)
         {
             var (azimuth, _, _) = planet.GetComponent<CelestialBody>().GetData();
-            int index = AzimuthToIndex(azimuth);
-            baseNoise[index] = planet.GetComponent<CelestialBody>().apparentLuminosity; // Ajoute 35 dB pour une étoile
+            float signal = planet.GetComponent<CelestialBody>().apparentLuminosity;
+            SpreadSignal(baseNoise, azimuth, signal);
         }
-        if(integrationToggle.GetComponent<Toggle>().isOn)
+
+        // CFAR sur le signal brut — avant intégration
+        // La fenêtre large (51 bins) estime le fond, le rejet des 5 maxima
+        // évite que le signal contamine l'estimation du bruit.
+        float[] average = SlidingAverage(baseNoise, 51, 5);
+        float[] stdev   = SlidingStdDev(baseNoise, 51, 5);
+
+        float[] cfarNoise = new float[baseNoise.Length];
+        for (int i = 0; i < baseNoise.Length; i++)
         {
-            lineData = integrate(baseNoise);
-        } 
+            float sigma = (stdev[i] > 1e-9f) ? stdev[i] : 2f * Mathf.Abs(average[i]);
+            if (sigma < 1e-12f) sigma = 1e-12f;
+            cfarNoise[i] = (baseNoise[i] - average[i]) / sigma; // z-score brut
+        }
+
+        // Intégration sur les scores CFAR — les fluctuations aléatoires du bruit
+        // se moyennent vers 0, le signal cohérent s'accumule
+        float[] lineData;
+        if (integrationToggle.GetComponent<Toggle>().isOn)
+        {
+            lineData = integrate(cfarNoise);
+        }
         else
         {
             integrator.Clear();
-            integrationCount = 1;       
-            lineData = baseNoise;
+            integrationCount = 1;
+            lineData = cfarNoise;
         }
-        float[] average = SlidingAverage(lineData, 20, 5);
-        float[] stdev = SlidingStdDev(lineData, 15, 5);
 
-        for (int i = 0; i<lineData.Length;i++)
-        {
-            lineData[i] = Mathf.Min(lineData[i]+((lineData[i]-average[i])/stdev[i]),100f);
-        }
-        // Ajoute la ligne au waterfall
+        // Compression finale : seuil à 3σ, saturation à 10σ
+        lineData = ApplyCompression(lineData, 0f, 3f, 10f);
+
         AddWaterfallLine(lineData);
-        // Met à jour le graphique DSP
         FindFirstObjectByType<DSPGraph>().DrawDSPGraph(lineData, pixelSize);
+    }
+
+    // Étale un signal sur ±2 bins voisins avec une pondération gaussienne (PSF du capteur)
+    private void SpreadSignal(float[] buffer, float azimuth, float signal)
+    {
+        int centerIndex = AzimuthToIndex(azimuth);
+        float spreadSigma = 1.2f; // écart-type en bins
+        for (int offset = -2; offset <= 2; offset++)
+        {
+            int idx = (centerIndex + offset + buffer.Length) % buffer.Length;
+            float weight = Mathf.Exp(-0.5f * (offset * offset) / (spreadSigma * spreadSigma));
+            buffer[idx] += signal * weight;
+        }
+    }
+
+    // Bruit gaussien via méthode Box-Muller
+    private float GaussianNoise(float mean, float stddev)
+    {
+        float u1 = Mathf.Max(1e-6f, 1f - Random.value);
+        float u2 = 1f - Random.value;
+        float normal = Mathf.Sqrt(-2f * Mathf.Log(u1)) * Mathf.Cos(2f * Mathf.PI * u2);
+        return mean + stddev * normal;
     }
 
     private float[] integrate(float[] line)
@@ -124,7 +156,7 @@ public class WaterfallScreen : ComputerScreen
         }
         for(int i = 0;i<line.Length;i++)
         {
-            outline[i] = outline[i]/integrationCount;
+            outline[i] = outline[i] / integrator.Count;
         }
         integrationCount = Mathf.Min(++integrationCount,integration);
         return outline;
@@ -165,15 +197,14 @@ public class WaterfallScreen : ComputerScreen
     }
 
     // Met à jour les couleurs des points d'une ligne (noir → vert clair)
+    // lineData est en sortie CFAR : ~0 pour le bruit, >1 pour les détections, jusqu'à 100
     private void UpdateLineColors(GameObject line, float[] lineData)
     {
-        lineData = ApplyCompression(lineData, -0.5f, 30f, 100f);
         for (int i = 0; i < lineData.Length; i++)
         {
             RawImage point = line.transform.GetChild(i).GetComponent<RawImage>();
-            float normalizedValue = lineData[i] / maxValue;
-            // Noir (0,0,0) → Vert clair (0.5f, 1, 0.5f)
-            point.color = new Color(0.5f * normalizedValue, normalizedValue, 0.5f * normalizedValue);
+            float t = Mathf.Clamp01(lineData[i]);
+            point.color = new Color(0.5f * t, t, 0.5f * t);
         }
     }
 
@@ -195,8 +226,8 @@ public class WaterfallScreen : ComputerScreen
 
 private int AzimuthToIndex(float azimuth)
 {
-    // Convertit l'azimut (0°-360°) en index (0-35) avec 0° au centre
-    int index = Mathf.FloorToInt((azimuth + 180f) / (360/pointCount)) % pointCount;
-    return index;
+    // Convertit l'azimut (-180° à 180°) en index (0 à pointCount-1)
+    int index = Mathf.FloorToInt((azimuth + 180f) / (360f / pointCount)) % pointCount;
+    return Mathf.Clamp(index, 0, pointCount - 1);
 }
 }

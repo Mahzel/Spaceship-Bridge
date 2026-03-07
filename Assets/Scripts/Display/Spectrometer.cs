@@ -23,14 +23,17 @@ public class Spectrometer : MonoBehaviour
     #endregion
 
     #region Private Fields
-    private Texture2D _spectrumTexture; // Texture pour afficher le spectre
-    private CelestialBody _currentTarget; // Cible actuelle du spectromètre
-    private List<GameObject> lineSegments; // Liste des segments de la courbe DSP
+    private Texture2D _spectrumTexture;
+    private CelestialBody _currentTarget;
+    private List<GameObject> lineSegments;
+    private float _maxSpectralIntensity = 1f; // Intensité max du spectre courant pour normalisation
+    private Transform _playerShip;            // Caché pour éviter FindGameObjectWithTag par frame
     #endregion
 
     #region Unity Methods
     void Start()
     {
+        _playerShip = GameObject.FindGameObjectWithTag("PlayerShip").transform;
         InitializeSpectrumTexture();
     }
     #endregion
@@ -88,20 +91,17 @@ public class Spectrometer : MonoBehaviour
     /// <returns>Le CelestialBody ciblé, ou null si aucun.</returns>
     private CelestialBody FindTargetInImagerCenter()
     {
-        Transform playerShip = GameObject.FindGameObjectWithTag("PlayerShip").transform;
+        if (_playerShip == null)
+            _playerShip = GameObject.FindGameObjectWithTag("PlayerShip").transform;
 
-        // Calculer la direction ajustée avec les offsets
-        Vector3 scanDirection = CalculateAdjustedScanDirection(playerShip, imager.offsetAzimuth, imager.offsetElevation);
-        Debug.DrawRay(playerShip.position, scanDirection * 10000, Color.red, 0.1f);
+        Vector3 scanDirection = CalculateAdjustedScanDirection(_playerShip, imager.offsetAzimuth, imager.offsetElevation);
+        Debug.DrawRay(_playerShip.position, scanDirection * 10000, Color.red, 0.1f);
 
         RaycastHit hit;
-        bool isHit = Physics.SphereCast(playerShip.position, 0.1f, scanDirection, out hit, Mathf.Infinity);
-
-        if (isHit && hit.collider != null)
+        if (Physics.SphereCast(_playerShip.position, 0.1f, scanDirection, out hit, Mathf.Infinity))
         {
-            CelestialBody body = hit.collider.GetComponent<CelestialBody>();
-            if (body != null)
-                return body;
+            CelestialBody body = hit.collider?.GetComponent<CelestialBody>();
+            if (body != null) return body;
         }
         return null;
     }
@@ -143,43 +143,38 @@ public class Spectrometer : MonoBehaviour
     /// <param name="spectrum">Spectre à dessiner.</param>
     private void DrawSpectrumCurve(Spectrum spectrum)
     {
-        // Effacer la texture
         ClearSpectrumTexture();
-
-        // Dessiner les axes (optionnel)
         DrawAxes();
 
-        // Dessiner les raies d'émission
+        _maxSpectralIntensity = 1f;
         foreach (SpectralLine line in spectrum.emissionLines)
-        {
-            DrawSpectralLine(line.wavelength, line.intensity, curveColor);
-        }
-
-        // Dessiner les raies d'absorption (en gris)
+            _maxSpectralIntensity = Mathf.Max(_maxSpectralIntensity, line.intensity);
         foreach (SpectralLine line in spectrum.absorptionLines)
-        {
-            DrawSpectralLine(line.wavelength, -line.intensity, Color.grey);
-        }
+            _maxSpectralIntensity = Mathf.Max(_maxSpectralIntensity, line.intensity);
+
+        foreach (SpectralLine line in spectrum.emissionLines)
+            DrawSpectralLine(line.wavelength, line.intensity, curveColor, false);
+
+        foreach (SpectralLine line in spectrum.absorptionLines)
+            DrawSpectralLine(line.wavelength, line.intensity, Color.grey, true); // vers le bas
     }
 
-    /// <summary>
-    /// Dessine une raie spectrale (émission ou absorption).
-    /// </summary>
-    /// <param name="wavelength">Longueur d'onde de la raie.</param>
-    /// <param name="intensity">Intensité de la raie.</param>
-    /// <param name="color">Couleur de la raie.</param>
-    private void DrawSpectralLine(float wavelength, float intensity, Color color)
+    private void DrawSpectralLine(float wavelength, float intensity, Color color, bool isAbsorption)
     {
-        // Convertir la longueur d'onde en position X (0 à spectrumWidth)
+        if (intensity <= 0f) return;
+
         int x = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, wavelength) * (spectrumWidth - 1));
+        if (x < 0 || x >= spectrumWidth) return;
 
-        // Calculer la hauteur de la raie (0 à spectrumHeight)
-        int height = Mathf.RoundToInt(2 * Mathf.Log10((Mathf.Abs(intensity) * (spectrumHeight - 1))));
+        float normalizedIntensity = Mathf.Clamp01(intensity / _maxSpectralIntensity);
+        float logHeight = Mathf.Log10(1f + 9f * normalizedIntensity);
+        int height = Mathf.RoundToInt(logHeight * (spectrumHeight / 2f - 1f));
+        if (height <= 0) return;
 
-        // Dessiner la raie (comme une ligne verticale)
+        int centerY = spectrumHeight / 2;
         for (int y = 0; y < height; y++)
         {
-            int yPos = intensity > 0 ? (spectrumHeight / 2 + y) : (spectrumHeight / 2 - y); // Émission vers le haut, absorption vers le bas
+            int yPos = isAbsorption ? centerY - y : centerY + y;
             if (yPos >= 0 && yPos < spectrumHeight)
                 _spectrumTexture.SetPixel(x, yPos, color);
         }
@@ -219,40 +214,30 @@ public class Spectrometer : MonoBehaviour
     /// <param name="target">Cible dont le spectre est analysé.</param>
     private void DrawDSP(CelestialBody target)
     {
-        // Initialiser les points de données
         float[] dataPoints = new float[spectrumWidth];
-        for (int i = 0; i < spectrumWidth - 1; i++)
-        {
-            dataPoints[i] = Random.Range(-1f, 1f);
-        }
 
-        // Ajouter les raies d'émission
+        // Bruit gaussien cohérent avec le reste du pipeline (σ = 0.002)
+        for (int i = 0; i < spectrumWidth; i++)
+            dataPoints[i] = GaussianNoise(0f, 0.002f);
+
+        // Raies d'émission et d'absorption étalées sur ±2 pixels (slit function gaussienne)
         foreach (SpectralLine s in target.spectrum.emissionLines)
         {
-            int x = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, s.wavelength) * (spectrumWidth - 1));
-            if (x >= 0 && x < spectrumWidth)
-                dataPoints[x] += Mathf.Log(s.intensity * 100) * 5;
+            int xCenter = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, s.wavelength) * (spectrumWidth - 1));
+            float amplitude = (s.intensity > 0f) ? Mathf.Log10(1f + s.intensity / _maxSpectralIntensity * 9f) * 5f : 0f;
+            SpreadSpectralSignal(dataPoints, xCenter, amplitude);
         }
-
-        // Ajouter les raies d'absorption
         foreach (SpectralLine s in target.spectrum.absorptionLines)
         {
-            int x = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, s.wavelength) * (spectrumWidth - 1));
-            if (x >= 0 && x < spectrumWidth)
-                dataPoints[x] -= Mathf.Log(s.intensity * 100) * 5;
+            int xCenter = Mathf.RoundToInt(Mathf.InverseLerp(wavelengthMin, wavelengthMax, s.wavelength) * (spectrumWidth - 1));
+            float amplitude = (s.intensity > 0f) ? Mathf.Log10(1f + s.intensity / _maxSpectralIntensity * 9f) * 5f : 0f;
+            SpreadSpectralSignal(dataPoints, xCenter, -amplitude);
         }
 
-        // Créer les points pour la courbe
-        Vector2[] points = new Vector2[spectrumWidth];
-        for (int i = 0; i < spectrumWidth; i++)
+        // Construire et afficher la courbe
+        for (int i = 0; i < dataPoints.Length - 1; i++)
         {
-            float y = Mathf.RoundToInt(dataPoints[i]);
-            points[i] = new Vector2(i, y);
-        }
-
-        // Dessiner les segments entre les points
-        for (int i = 0; i < points.Length - 1; i++)
-        {
+            float y = dataPoints[i];
             GameObject segment;
             if (lineSegments.Count <= i)
             {
@@ -264,18 +249,44 @@ public class Spectrometer : MonoBehaviour
                 segment = lineSegments[i];
             }
 
-            // Configurer le RectTransform du segment
             RectTransform segmentRect = segment.GetComponent<RectTransform>();
             segmentRect.anchorMin = new Vector2(0, 0.5f);
             segmentRect.anchorMax = new Vector2(0, 0.5f);
-            segmentRect.pivot = Vector2.zero;
+            segmentRect.pivot     = Vector2.zero;
 
-            // Positionner et étirer le segment entre les deux points
-            segmentRect.localPosition = points[i];
-            Vector2 direction = points[i + 1] - points[i];
-            segmentRect.sizeDelta = new Vector2(direction.magnitude, 1f);
-            segmentRect.rotation = Quaternion.Euler(0, 0, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
+            Vector2 p0 = new Vector2(i,     dataPoints[i]);
+            Vector2 p1 = new Vector2(i + 1, dataPoints[i + 1]);
+            Vector2 dir = p1 - p0;
+            segmentRect.localPosition = p0;
+            segmentRect.sizeDelta  = new Vector2(dir.magnitude, 1f);
+            segmentRect.rotation   = Quaternion.Euler(0, 0, Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg);
         }
+
+        // Désactiver les segments excédentaires du frame précédent
+        for (int i = dataPoints.Length - 1; i < lineSegments.Count; i++)
+            lineSegments[i].SetActive(false);
+    }
+
+    // Étale un signal sur ±2 pixels avec une PSF gaussienne (σ = 1.2 px)
+    private void SpreadSpectralSignal(float[] buffer, int center, float amplitude)
+    {
+        float sigma = 1.2f;
+        for (int offset = -2; offset <= 2; offset++)
+        {
+            int idx = center + offset;
+            if (idx < 0 || idx >= buffer.Length) continue;
+            float weight = Mathf.Exp(-0.5f * (offset * offset) / (sigma * sigma));
+            buffer[idx] += amplitude * weight;
+        }
+    }
+
+    // Bruit gaussien via Box-Muller
+    private float GaussianNoise(float mean, float stddev)
+    {
+        float u1 = Mathf.Max(1e-6f, 1f - Random.value);
+        float u2 = 1f - Random.value;
+        float normal = Mathf.Sqrt(-2f * Mathf.Log(u1)) * Mathf.Cos(2f * Mathf.PI * u2);
+        return mean + stddev * normal;
     }
     #endregion
 }

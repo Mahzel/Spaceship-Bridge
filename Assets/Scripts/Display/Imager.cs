@@ -396,75 +396,47 @@ public void OnBodySelected()
 private float CalculateDirectionalLuminosity(float azimuth, float elevation)
 {
     float totalLuminosity = UnityEngine.Random.Range(0, 0.005f);
-
-    // Résolution angulaire d'un bloc (en degrés)
     float blockAngularResolution = fieldOfView / _scanResolution;
 
-    // Trier les objets par distance
     List<CelestialBody> sortedBodies = _celestialBodies.OrderBy(body => body.distance).ToList();
 
     foreach (CelestialBody body in sortedBodies)
     {
         if (body.distance > 5000f) continue;
 
-        // Calculer le rayon angulaire de l'objet
         float angularRadius = body.angularSize;
-        float sigma = angularRadius*1.25f;
-        float bodyAzimuth = body.azimuth;
+        float bodyAzimuth   = body.azimuth;
         float bodyElevation = body.elevation;
 
-        // Calculer l'angle entre la direction du capteur et l'objet
-        float azimuthDiff = Mathf.Abs(azimuth - bodyAzimuth);
+        float azimuthDiff   = Mathf.Abs(azimuth   - bodyAzimuth);
         float elevationDiff = Mathf.Abs(elevation - bodyElevation);
+        float angularDist   = Mathf.Sqrt(azimuthDiff * azimuthDiff + elevationDiff * elevationDiff);
 
-        // Si l'objet est "dans cette direction" (chevauche le bloc)
-        if (azimuthDiff < angularRadius + blockAngularResolution / 2f &&
-            elevationDiff < angularRadius + blockAngularResolution / 2f)
+        float cutoff = angularRadius + blockAngularResolution;
+        if (angularDist >= cutoff) continue;
+
+        float weight;
+        if (angularDist <= angularRadius)
         {
-            // Calculer la fraction de chevauchement
-            float overlapFraction = CalculateOverlapFraction(
-                azimuthDiff, elevationDiff,
-                angularRadius, blockAngularResolution / 2f);
-
-            // Pondération gaussienne pour les objets proches des bords
-            float weight = Mathf.Exp(-0.5f * (azimuthDiff * azimuthDiff + elevationDiff * elevationDiff) / (sigma * sigma));
-
-            // Contribution totale = luminosité * fraction de chevauchement * poids gaussien
-            float bodyLuminosity = body.apparentLuminosity;
-            totalLuminosity += bodyLuminosity * overlapFraction * weight;
+            // Dans le disque : contribution pleine
+            weight = 1f;
         }
+        else
+        {
+            // En dehors du disque mais dans le voisinage du pixel : PSF gaussienne
+            float sigma = Mathf.Max(blockAngularResolution / 2f, 0.001f);
+            float excess = angularDist - angularRadius;
+            weight = Mathf.Exp(-0.5f * (excess * excess) / (sigma * sigma));
+        }
+
+        totalLuminosity += body.apparentLuminosity * weight;
     }
 
-    return NormalizeLuminosity(totalLuminosity);
+    return ApplyCompression(new float[]{ totalLuminosity }, 0, dynamicCompressionFactor, maxExpectedLuminosity)[0];
 }
 
-/// <summary>
-/// Calcule la fraction de chevauchement entre un objet et un bloc.
-/// </summary>
-private float CalculateOverlapFraction(float azimuthDiff, float elevationDiff,
-    float angularRadius, float halfBlockResolution)
-{
-    // Distance normalisée entre le centre de l'objet et le centre du bloc
-    float normalizedAzimuthDiff = azimuthDiff / (angularRadius + halfBlockResolution);
-    float normalizedElevationDiff = elevationDiff / (angularRadius + halfBlockResolution);
 
-    // Calculer la distance normalisée au centre
-    float normalizedDistanceToCenter = Mathf.Sqrt(
-        normalizedAzimuthDiff * normalizedAzimuthDiff +
-        normalizedElevationDiff * normalizedElevationDiff);
 
-    // Si l'objet est complètement dans le bloc
-    if (normalizedDistanceToCenter <= halfBlockResolution / (angularRadius + halfBlockResolution))
-        return 1f;
-
-    // Si l'objet est complètement hors du bloc
-    if (normalizedDistanceToCenter >= 1f)
-        return 0f;
-
-    // Fraction de chevauchement (1 à la frontière, 0 en dehors)
-    float overlapFraction = 1f - normalizedDistanceToCenter;
-    return Mathf.Clamp01(overlapFraction);
-}
 
 
     /// <summary>
@@ -507,28 +479,8 @@ private float CalculateOverlapFraction(float azimuthDiff, float elevationDiff,
             return new Color(t, 1, t);
         }
     }
+
 /// <summary>
-    /// Normalise la luminosité en utilisant une échelle logarithmique et une compression de dynamique.
-    /// </summary>
-    /// <param name="luminosity">Luminosité brute.</param>
-    /// <returns>Luminosité normalisée (0 à 1).</returns>
-    private float NormalizeLuminosity(float luminosity)
-    {/*
-        // Appliquer une compression de dynamique
-        float compressedLuminosity = Mathf.Pow(luminosity, 1f / dynamicCompressionFactor);
-
-        // Échelle logarithmique pour compresser les valeurs élevées
-        float logLuminosity = Mathf.Log10(1f + compressedLuminosity);
-
-        // Normaliser en fonction de maxExpectedLuminosity
-        float normalizedLogLuminosity = logLuminosity / Mathf.Log10(1f + maxExpectedLuminosity);
-
-        // Garantir que les étoiles faibles soient visibles
-        return Mathf.Clamp01(normalizedLogLuminosity);*/
-        return ApplyCompression(new float[]{luminosity}, 0,dynamicCompressionFactor,maxExpectedLuminosity)[0];
-    }
-
-    /// <summary>
 /// Dessine les cercles de debug pour chaque objet céleste.
 /// </summary>
 private void DrawDebugCircles()
@@ -562,7 +514,7 @@ private void DrawDebugCircles()
         int objY = centerY + Mathf.RoundToInt(relY);
 
         // Calculer le rayon du cercle en pixels
-        float angularRadius = CalculateAngularRadiusFromCollider(body.gameObject);
+        float angularRadius = body.angularSize;
         float pixelRadius = (angularRadius / fieldOfView ) * _debugTexture.width;
 
         // Dessiner le cercle
@@ -618,8 +570,8 @@ public float CalculateAngularRadiusFromCollider(GameObject target)
         return 0f;
     }
 
-    float objectRadius = collider.radius * transform.lossyScale.x; // Rayon en unités Unity
-    float distance = Vector3.Distance(transform.position, playerShip.position);
+    float objectRadius = collider.radius * target.transform.lossyScale.x; // Rayon en unités Unity
+    float distance = Vector3.Distance(target.transform.position, playerShip.position);
 
     // Calculer le rayon angulaire
     float angularRadius = Mathf.Atan2(objectRadius, distance) * Mathf.Rad2Deg;
@@ -676,7 +628,7 @@ private IEnumerator ScanRoutine()
                 {
                     luminosity += integratorGrid[i][sx,sy];
                 }
-                luminosity = luminosity / (float)(integrator+1f);
+                luminosity = luminosity / (float)integratorGrid.Count;
 
                 // Convertir en couleur
                 Color blockColor = GetIntensityColor(luminosity*sensorGain);

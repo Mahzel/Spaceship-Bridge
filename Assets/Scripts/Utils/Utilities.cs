@@ -145,33 +145,31 @@ public static float[] SlidingStdDev(float[] signal, int windowSize, int rejectMa
     return stdDevSignal;
 }
 public static float CompressionLaw(float input, float xMin, float xCoude, float xMax)
+{
+    if (xMin >= xCoude || xCoude >= xMax)
     {
-        // Vérifie que les valeurs sont dans l'ordre attendu
-        if (xMin >= xCoude || xCoude >= xMax)
-        {
-            Debug.LogError("Les valeurs doivent être dans l'ordre : Xmin < Xcoude < Xmax.");
-            return input;
-        }
-
-        // Si la valeur est en dessous de Xmin, retourne 0 (ou une valeur minimale)
-        if (input <= xMin)
-            return 0f;
-
-        // Si la valeur est entre Xmin et Xcoude, applique une progression linéaire
-        if (input <= xCoude)
-        {
-            return (input + xMin);
-        }
-
-        // Si la valeur est entre Xcoude et Xmax, applique une progression logarithmique
-        if (input <= xMax)
-        {
-            return Mathf.Log10(input)+input;
-        }
-
-        // Si la valeur dépasse Xmax, retourne 1 (ou une valeur maximale)
-        return 1f;
+        Debug.LogError("Invalid parameters: Xmin < Xcoude < Xmax required");
+        return 0f;
     }
+
+    if (input <= xMin)
+        return 0f;
+
+    if (input <= xCoude)
+    {
+        // Linear progression from 0 to 0.5
+        return Mathf.Lerp(0f, 0.5f, (input - xMin) / (xCoude - xMin));
+    }
+
+    if (input <= xMax)
+    {
+        // Logarithmic progression from 0.5 to 1.0
+        float t = (input - xCoude) / (xMax - xCoude);
+        return 0.5f + 0.5f * Mathf.Log10(1 + 9 * t); // Maps [0,1] to [0.5,1]
+    }
+
+    return 1f; // Clamped maximum
+}
 
     // Applique la loi de compression à un tableau de valeurs
     public static float[] ApplyCompression(float[] input, float xMin, float xCoude, float xMax)

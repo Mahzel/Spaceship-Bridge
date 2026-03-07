@@ -10,13 +10,13 @@ using System.Linq;
 public class SystemManager : MonoBehaviour
 {
     #region Constants
-    private const int DEFAULT_BASE_SEED = 645865465;
-    private const float GAME_UNITS_PER_UA = 100f;
-    private const float SOLAR_RADIUS_IN_METERS = 6.957e8f;
-    private const float AU_IN_METERS = 1.496e11f;
-    private const float SOLAR_LUMINOSITY = 3.828e26f;
+    private const int    DEFAULT_BASE_SEED      = 645865465;
+    private const float  GAME_UNITS_PER_UA      = 100f;
+    private const float  SOLAR_RADIUS_IN_METERS = 6.957e8f;
+    private const float  AU_IN_METERS           = 1.496e11f;
+    private const float  SOLAR_LUMINOSITY       = 3.828e26f;
     private readonly char[] LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray();
-    private const int POOL_SIZE = 10;
+    private const int POOL_SIZE = 20;
     #endregion
 
     #region Fields
@@ -28,7 +28,7 @@ public class SystemManager : MonoBehaviour
     [Header("Configuration")]
     public int defaultBaseSeed = DEFAULT_BASE_SEED;
 
-    private int baseSeed;
+    private int    baseSeed;
     private string currentSystemID;
     private ObjectPool<Transform> celestialPool;
     private GameObject playerShip;
@@ -37,36 +37,27 @@ public class SystemManager : MonoBehaviour
     #region Unity Methods
     private void Awake()
     {
-        baseSeed = PlayerPrefs.GetInt("BaseSeed", defaultBaseSeed);
+        baseSeed      = PlayerPrefs.GetInt("BaseSeed", defaultBaseSeed);
         celestialPool = new ObjectPool<Transform>(planetPrefab.transform, POOL_SIZE, transform);
     }
 
-    private void Start()
-    {
-        JumpToNewSystem();
-    }
+    private void Start() => JumpToNewSystem();
     #endregion
 
-    #region System Generation
+    #region Public API
     public void JumpToNewSystem()
     {
-        string newSystemID = GenerateSystemID(Random.Range(0, 640000));
-        Debug.Log($"ID du système généré : {newSystemID}");
-        JumpToSystem(newSystemID);
+        string id = GenerateSystemID(Random.Range(0, 640000));
+        Debug.Log($"ID du système généré : {id}");
+        JumpToSystem(id);
     }
 
-    public void JumpToSystem(string targetSystemID)
+    public void JumpToSystem(string targetID)
     {
-        if (IsValidSystemID(targetSystemID))
-        {
-            ClearCurrentSystem();
-            GenerateStarSystem(targetSystemID);
-            currentSystemID = targetSystemID;
-        }
-        else
-        {
-            Debug.LogError("ID de système invalide !");
-        }
+        if (!IsValidSystemID(targetID)) { Debug.LogError("ID de système invalide !"); return; }
+        ClearCurrentSystem();
+        GenerateStarSystem(targetID);
+        currentSystemID = targetID;
     }
 
     public void SetBaseSeed(int newSeed)
@@ -74,799 +65,595 @@ public class SystemManager : MonoBehaviour
         baseSeed = newSeed;
         PlayerPrefs.SetInt("BaseSeed", baseSeed);
         PlayerPrefs.Save();
-        Debug.Log($"BaseSeed mise à jour : {baseSeed}");
     }
     #endregion
 
+    // =========================================================================
+    #region System Generation — Entry Point
+    private void GenerateStarSystem(string systemID)
+    {
+        if (!IsValidSystemID(systemID)) { Debug.LogError("ID invalide !"); return; }
+
+        ClearCurrentSystem();
+
+        if (playerShip == null && playerShipPrefab != null)
+            playerShip = Instantiate(playerShipPrefab);
+
+        Random.InitState(baseSeed + HashIDToSeed(systemID));
+
+        // --- Multiplicité ---
+        // 50% simples | 40% binaires | 10% trinaires
+        float roll     = Random.value;
+        int   starCount = roll < 0.50f ? 1 : roll < 0.90f ? 2 : 3;
+
+        Transform systemRoot;
+        float     totalStarMass;
+        float     minOrbitUA;
+
+        if (starCount == 1)
+            (systemRoot, totalStarMass, minOrbitUA) = GenerateSingleStar(systemID, Vector3.zero);
+        else
+            (systemRoot, totalStarMass, minOrbitUA) = GenerateMultipleStars(systemID, Vector3.zero, starCount);
+
+        GeneratePlanets(systemID, systemRoot, totalStarMass, minOrbitUA);
+
+        float lastOrbit = GetLastPlanetOrbit(systemRoot);
+        PlacePlayerShip(systemRoot,
+            Mathf.Max(lastOrbit * 1.1f, minOrbitUA * GAME_UNITS_PER_UA * 2f));
+    }
+    #endregion
+
+    // =========================================================================
+    #region Star Generation
+
+    /// <summary>Étoile unique fixe au centre.</summary>
+    private (Transform root, float mass, float minOrbitUA) GenerateSingleStar(
+        string systemID, Vector3 position)
+    {
+        StarData data  = RandomStarData($"{systemID} A");
+        GameObject go  = SpawnStar(data, transform, position);
+        go.name        = data.name;
+
+        float minOrbitUA = CalculateMinimumOrbitalDistance(data.radiusGame) / GAME_UNITS_PER_UA;
+        return (go.transform, data.mass, minOrbitUA);
+    }
+
+    /// <summary>Système binaire ou trinaire avec barycentre(s).</summary>
+    private (Transform root, float totalMass, float minOrbitUA) GenerateMultipleStars(
+        string systemID, Vector3 position, int count)
+    {
+        // Barycentre racine — immobile, centre du système
+        GameObject rootBC = CreateBarycenter($"{systemID}_BC", transform, position);
+        Barycenter bc     = rootBC.GetComponent<Barycenter>();
+
+        float totalMass      = 0f;
+        float maxRadiusGame  = 0f;
+
+        if (count == 2)
+        {
+            float separationUA = Random.Range(5f, 80f);
+            var (starA, starB) = GenerateBinaryPair(
+                systemID, rootBC.transform, separationUA, "A", "B");
+
+            bc.bodies = new List<CelestialBody> { starA, starB };
+            bc.UpdatePosition();
+
+            totalMass     = starA.mass + starB.mass;
+            maxRadiusGame = Mathf.Max(starA.radius, starB.radius);
+        }
+        else // count == 3
+        {
+            // Paire AB + étoile C lointaine
+            float sepAB = Random.Range(2f, 20f);
+            float sepC  = Random.Range(100f, 500f);
+
+            GameObject abBC  = CreateBarycenter($"{systemID}_BC_AB", rootBC.transform, position);
+            Barycenter abBCc = abBC.GetComponent<Barycenter>();
+
+            var (starA, starB) = GenerateBinaryPair(
+                systemID, abBC.transform, sepAB, "A", "B");
+
+            abBCc.bodies = new List<CelestialBody> { starA, starB };
+            abBCc.UpdatePosition();
+
+            float massAB = starA.mass + starB.mass;
+
+            StarData dataC = RandomStarData($"{systemID} C");
+            GameObject goC = SpawnStar(dataC, rootBC.transform, position);
+
+            // AB orbite autour du barycentre racine
+            ConfigureOrbit(abBC.GetComponent<OrbitalComponent>() ?? abBC.AddComponent<OrbitalComponent>(),
+                rootBC.transform, sepC, massAB, dataC.mass, isBodyA: true);
+
+            // C orbite autour du barycentre racine (côté opposé)
+            ConfigureOrbit(goC.GetComponent<OrbitalComponent>() ?? goC.AddComponent<OrbitalComponent>(),
+                rootBC.transform, sepC, massAB, dataC.mass, isBodyA: false);
+
+            CelestialBody starC = goC.GetComponent<CelestialBody>();
+            bc.bodies = new List<CelestialBody> { starA, starB, starC };
+            bc.UpdatePosition();
+
+            totalMass     = massAB + dataC.mass;
+            maxRadiusGame = Mathf.Max(starA.radius, Mathf.Max(starB.radius, dataC.radiusGame));
+        }
+
+        // Planètes circumbinaires : règle P-type, a > 3.5 × séparation
+        float minOrbitUA = Mathf.Max(
+            CalculateMinimumOrbitalDistance(maxRadiusGame) / GAME_UNITS_PER_UA,
+            3.5f);
+
+        return (rootBC.transform, totalMass, minOrbitUA);
+    }
+
+    /// <summary>Génère une paire d'étoiles en orbite mutuelle autour d'un barycentre.</summary>
+    private (CelestialBody starA, CelestialBody starB) GenerateBinaryPair(
+        string systemID, Transform barycenter,
+        float separationUA, string suffA, string suffB)
+    {
+        StarData dA = RandomStarData($"{systemID} {suffA}");
+        StarData dB = RandomStarData($"{systemID} {suffB}");
+
+        GameObject goA = SpawnStar(dA, barycenter, barycenter.position);
+        GameObject goB = SpawnStar(dB, barycenter, barycenter.position);
+
+        OrbitalComponent orbA = goA.GetComponent<OrbitalComponent>() ?? goA.AddComponent<OrbitalComponent>();
+        OrbitalComponent orbB = goB.GetComponent<OrbitalComponent>() ?? goB.AddComponent<OrbitalComponent>();
+
+        ConfigureOrbit(orbA, barycenter, separationUA, dA.mass, dB.mass, isBodyA: true);
+        ConfigureOrbit(orbB, barycenter, separationUA, dA.mass, dB.mass, isBodyA: false);
+
+        return (goA.GetComponent<CelestialBody>(), goB.GetComponent<CelestialBody>());
+    }
+
+    /// <summary>
+    /// Configure un OrbitalComponent pour un membre d'une paire.
+    /// isBodyA=true → demi-grand axe pondéré par m_B, argument ω = 0°
+    /// isBodyA=false → demi-grand axe pondéré par m_A, argument ω = 180° (orbites opposées)
+    /// </summary>
+    private void ConfigureOrbit(OrbitalComponent orb, Transform focus,
+        float separationUA, float massA, float massB, bool isBodyA)
+    {
+        float total  = massA + massB;
+        float sma    = separationUA * GAME_UNITS_PER_UA
+                     * (isBodyA ? massB / total : massA / total);
+        float period = Mathf.Sqrt(Mathf.Pow(separationUA, 3f) / total);
+
+        orb.focus              = focus;
+        orb.semiMajorAxis      = sma;
+        orb.eccentricity       = Random.Range(0f, 0.5f);
+        orb.inclination        = Random.Range(-10f, 10f);
+        orb.longitudeAscNode   = Random.Range(0f, 360f);
+        orb.argumentPeriapsis  = isBodyA ? 0f   : 180f;
+        orb.meanAnomalyAtEpoch = isBodyA ? 0f   : 180f;
+        orb.orbitalPeriod      = YearsToGameSeconds(period);
+        orb.Reset();
+    }
+
+    // --- Helpers ---
+
+    private struct StarData
+    {
+        public string name;
+        public float  temperature, luminosity, mass, radiusGame, radiusSol;
+    }
+
+    private StarData RandomStarData(string name)
+    {
+        float temp, lum;
+        RandomizeHRPosition(out temp, out lum);
+        float mass   = EstimateStarMass(lum, temp);
+        float rSol   = CalculateStarRadius(lum, temp);
+        float rGame  = SolarRadiusToGameUnits(rSol);
+        return new StarData { name = name, temperature = temp, luminosity = lum,
+                              mass = mass, radiusGame = rGame, radiusSol = rSol };
+    }
+
+    private GameObject SpawnStar(StarData d, Transform parent, Vector3 position)
+    {
+        GameObject go = celestialPool.Get().gameObject;
+        go.GetComponent<CelestialBody>()?.Reset();
+        go.transform.SetParent(parent);
+        go.transform.position  = position;
+        go.transform.localScale = Vector3.one * d.radiusGame;
+        go.name = d.name;
+        go.tag  = "Star";
+
+        SphereCollider col = go.GetComponent<SphereCollider>();
+        if (col != null) col.radius = d.radiusGame;
+
+        CelestialBody body = go.GetComponent<CelestialBody>();
+        if (body == null) body = go.AddComponent<CelestialBody>();
+        body.bodyName            = d.name;
+        body.bodyType            = DetermineStarType(d.luminosity, d.temperature);
+        body.temperature         = d.temperature;
+        body.mass                = d.mass;
+        body.radius              = d.radiusGame;
+        body.solRadius           = d.radiusSol;
+        body.starLuminosity      = d.luminosity;
+        body.chemicalComposition = DetermineChemicalComposition("Star");
+        body.spectrum            = DetermineSpectrum(body.chemicalComposition);
+        return go;
+    }
+
+    private GameObject CreateBarycenter(string name, Transform parent, Vector3 position)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent);
+        go.transform.position = position;
+        go.AddComponent<Barycenter>();
+        // OrbitalComponent ajouté à la demande dans GenerateMultipleStars
+        return go;
+    }
+    #endregion
+
+    // =========================================================================
+    #region Planet Generation
+    private void GeneratePlanets(string systemID, Transform systemRoot,
+        float totalStarMass, float minOrbitUA)
+    {
+        float totalLuminosity = GetTotalSystemLuminosity(systemRoot);
+        List<(float radius, float width)> orbits = new List<(float, float)>();
+
+        int planetCount = Random.Range(3, 10);
+        int nameIdx     = 1;
+
+        for (int i = 0; i < planetCount; i++)
+        {
+            bool  valid   = false;
+            float rGame   = 0f;
+            float width   = 0f;
+            float pMass   = 0f;
+            int   tries   = 0;
+
+            while (!valid && tries < 100)
+            {
+                tries++;
+                float rUA = Random.Range(minOrbitUA, minOrbitUA + 50f);
+                rGame  = rUA * GAME_UNITS_PER_UA;
+                pMass  = Random.Range(0.1f, 5f);
+                width  = CalculateOrbitalWidth(rGame, pMass, totalStarMass);
+                valid  = orbits.All(o => !DoOrbitsOverlap(rGame, width, o.radius, o.width));
+            }
+
+            if (!valid) { Debug.LogWarning($"Pas d'orbite valide pour planète {i}."); continue; }
+
+            orbits.Add((rGame, width));
+            orbits = orbits.OrderBy(o => o.radius).ToList();
+
+            float rUA2       = rGame / GAME_UNITS_PER_UA;
+            float period     = Mathf.Sqrt(Mathf.Pow(rUA2, 3f) / totalStarMass);
+            string pType     = DeterminePlanetType(rUA2, 0f);
+            float  albedo    = GenerateAlbedo(pType);
+            float  temp      = DetermineTemperature(rUA2, totalLuminosity, albedo);
+            float  density   = DetermineDensity(pType);
+            float  sizeSol   = DetermineNormalizedSize(pType, pMass);
+            float  sizeGame  = SolarRadiusToGameUnits(sizeSol);
+
+            GameObject planet = celestialPool.Get().gameObject;
+            planet.GetComponent<CelestialBody>()?.Reset();
+            planet.transform.SetParent(systemRoot);
+            planet.transform.position   = systemRoot.position;
+            planet.transform.localScale = Vector3.one * sizeGame;
+            planet.tag = "Planet";
+            planet.name = $"{systemID} {nameIdx++}";
+
+            SphereCollider col = planet.GetComponent<SphereCollider>();
+            if (col != null) col.radius = sizeGame;
+
+            CelestialBody body = planet.GetComponent<CelestialBody>() ?? planet.AddComponent<CelestialBody>();
+            body.bodyName            = planet.name;
+            body.bodyType            = pType;
+            body.temperature         = temp;
+            body.mass                = pMass;
+            body.density             = density;
+            body.radius              = sizeGame;
+            body.albedo              = albedo;
+            body.chemicalComposition = DetermineChemicalComposition(pType);
+            body.spectrum            = DetermineSpectrum(body.chemicalComposition);
+
+            OrbitalComponent orb = planet.GetComponent<OrbitalComponent>() ?? planet.AddComponent<OrbitalComponent>();
+            orb.focus              = systemRoot;
+            orb.semiMajorAxis      = rGame;
+            orb.eccentricity       = Random.Range(0f, 0.3f);
+            orb.inclination        = Random.Range(-15f, 15f);
+            orb.longitudeAscNode   = Random.Range(0f, 360f);
+            orb.argumentPeriapsis  = Random.Range(0f, 360f);
+            orb.meanAnomalyAtEpoch = Random.Range(0f, 360f);
+            orb.orbitalPeriod      = YearsToGameSeconds(period);
+            orb.Reset();
+        }
+    }
+
+    private float GetTotalSystemLuminosity(Transform root)
+    {
+        float total = 0f;
+        foreach (CelestialBody b in root.GetComponentsInChildren<CelestialBody>())
+            if (b.starLuminosity > 0f) total += b.starLuminosity;
+        return Mathf.Max(total, 0.0001f);
+    }
+
+    private float GetLastPlanetOrbit(Transform root)
+    {
+        float last = 0f;
+        foreach (OrbitalComponent orb in root.GetComponentsInChildren<OrbitalComponent>())
+        {
+            CelestialBody b = orb.GetComponent<CelestialBody>();
+            if (b != null && b.starLuminosity == 0f)
+                last = Mathf.Max(last, orb.semiMajorAxis);
+        }
+        return last;
+    }
+    #endregion
+
+    // =========================================================================
+    #region Player Placement
+    private void PlacePlayerShip(Transform systemRoot, float distance)
+    {
+        if (playerShip == null) { Debug.LogError("Vaisseau joueur non assigné !"); return; }
+        playerShip.transform.SetParent(systemRoot);
+        float az = Random.Range(0f, 360f) * Mathf.Deg2Rad;
+        playerShip.transform.position = systemRoot.position
+            + new Vector3(distance * Mathf.Cos(az), 0f, distance * Mathf.Sin(az));
+        playerShip.transform.LookAt(systemRoot);
+        playerShip.transform.SetAsLastSibling();
+    }
+    #endregion
+
+    // =========================================================================
+    #region System Cleanup
+    private void ClearCurrentSystem()
+    {
+        List<Transform> children = new List<Transform>();
+        foreach (Transform child in transform) children.Add(child);
+
+        foreach (Transform child in children)
+        {
+            if (playerShip != null) playerShip.transform.parent = transform;
+            if (!child.CompareTag("PlayerShip") && child.gameObject.activeInHierarchy)
+                ReturnToPoolRecursive(child);
+        }
+    }
+
+    private void ReturnToPoolRecursive(Transform t)
+    {
+        List<Transform> children = new List<Transform>();
+        foreach (Transform c in t) children.Add(c);
+        foreach (Transform c in children) ReturnToPoolRecursive(c);
+
+        CelestialBody body = t.GetComponent<CelestialBody>();
+        if (body != null)
+        {
+            body.Reset();
+            t.parent = transform;
+            celestialPool.ReturnToPool(t);
+        }
+        else
+        {
+            Destroy(t.gameObject); // barycentre ou autre objet non-poolé
+        }
+    }
+    #endregion
+
+    // =========================================================================
+    #region Orbital Mechanics Helpers
+    private float CalculateMinimumOrbitalDistance(float starRadiusGame) => starRadiusGame * 1.2f;
+
+    private float CalculateOrbitalWidth(float r, float planetMass, float starMass)
+        => r * Mathf.Pow(planetMass / (3f * starMass), 1f / 3f);
+
+    private bool DoOrbitsOverlap(float r1, float w1, float r2, float w2)
+        => Mathf.Abs(r1 - r2) < (w1 + w2) / 2f;
+    #endregion
+
+    // =========================================================================
     #region ID Generation
     private string GenerateSystemID(int seed)
     {
         Random.InitState(seed);
-        char firstLetter = LETTERS[Random.Range(0, 26)];
-        char secondLetter = LETTERS[Random.Range(0, 26)];
-        int part1 = Random.Range(0, 10);
-        int part2 = Random.Range(0, 100);
-        int part3 = Random.Range(0, 100000);
-        return $"{firstLetter}{secondLetter}-{part1}-{part2:D2}-{part3:D5}";
+        return $"{LETTERS[Random.Range(0,26)]}{LETTERS[Random.Range(0,26)]}"
+             + $"-{Random.Range(0,10)}-{Random.Range(0,100):D2}-{Random.Range(0,100000):D5}";
     }
 
     private bool IsValidSystemID(string id)
-    {
-        return Regex.IsMatch(id, @"^[A-Z]{2}-\d-\d{2}-\d{5}$");
-    }
+        => Regex.IsMatch(id, @"^[A-Z]{2}-\d-\d{2}-\d{5}$");
 
     private int HashIDToSeed(string id)
     {
-        using (SHA256 sha256 = SHA256.Create())
+        using (SHA256 sha = SHA256.Create())
         {
-            byte[] hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(id));
-            int seed = BitConverter.ToInt32(hashBytes, 0);
-            return seed & 0x7FFFFFFF;
+            byte[] h = sha.ComputeHash(Encoding.UTF8.GetBytes(id));
+            return BitConverter.ToInt32(h, 0) & 0x7FFFFFFF;
         }
     }
     #endregion
 
-    #region Orbital Mechanics
-    // Calcule la distance minimale pour une orbite en fonction du rayon de l'étoile
-    private float CalculateMinimumOrbitalDistance(float starRadiusInGameUnits)
-    {
-        // La distance minimale est au moins 2 fois le rayon de l'étoile
-        return starRadiusInGameUnits * 1.2f;
-    }
-
-    // Calcule la largeur de l'orbite en fonction de la masse de la planète et de la masse de l'étoile
-    private float CalculateOrbitalWidth(float orbitalRadius, float planetMass, float starMass)
-    {
-        // Calcul du rayon de la sphère de Hill
-        float hillSphereRadius = orbitalRadius * Mathf.Pow(planetMass / (3 * starMass), 1f / 3f);
-
-        // La largeur minimale de l'orbite est proportionnelle à la sphère de Hill
-        return hillSphereRadius;
-    }
-
-    // Vérifie si une nouvelle orbite chevauche une orbite existante
-    private bool DoOrbitsOverlap(float newOrbitalRadius, float newOrbitalWidth, float existingOrbitalRadius, float existingOrbitalWidth)
-    {
-        float minDistance = Mathf.Abs(newOrbitalRadius - existingOrbitalRadius);
-        float minSeparation = (newOrbitalWidth + existingOrbitalWidth) / 2f;
-
-        return minDistance < minSeparation;
-    }
-
-    // Calcule la position orbitale initiale en fonction des paramètres orbitaux
-    private Vector3 CalculateOrbitalPosition(float radius, float inclination, float eccentricity, float angle)
-    {
-        float trueAnomaly = angle;
-        float radialDistance = radius * (1 - eccentricity * eccentricity)
-                             / (1 + eccentricity * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly));
-
-        float x     = radialDistance * Mathf.Cos(Mathf.Deg2Rad * trueAnomaly);
-        float zFlat = radialDistance * Mathf.Sin(Mathf.Deg2Rad * trueAnomaly);
-
-        // Rotation autour de l'axe X pour appliquer l'inclinaison
-        float incRad = Mathf.Deg2Rad * inclination;
-        float y = zFlat * Mathf.Sin(incRad);
-        float z = zFlat * Mathf.Cos(incRad);
-
-        return new Vector3(x, y, z);
-    }
-    #endregion
-
-    #region Planet Properties
-    // Détermine le type de planète en fonction de sa distance à l'étoile
-    private string DeterminePlanetType(float orbitalRadiusInUA, float starTemperature)
-    {
-        if (orbitalRadiusInUA < 0.72f)
-        {
-            return "Rocheuse";
-        }
-        else if (orbitalRadiusInUA < 1.52f)
-        {
-            return Random.value > 0.7f ? "Ceinture d'astéroïdes" : "Rocheuse";
-        }
-        else if (orbitalRadiusInUA < 5.2f)
-        {
-            return "Gazeuse";
-        }
-        else
-        {
-            return "Glacée";
-        }
-    }
-
-    // Calcule la température d'équilibre radiatif de la planète.
-    // Formule : T = 278 * L^0.25 * (1 - albedo)^0.25 / sqrt(d)
-    // avec L en luminosités solaires et d en UA.
-    private float DetermineTemperature(float orbitalRadiusInUA, float starLuminosity, float albedo)
-    {
-        if (orbitalRadiusInUA <= 0f) return 50f;
-        float temperature = 278f
-            * Mathf.Pow(starLuminosity, 0.25f)
-            * Mathf.Pow(Mathf.Max(0f, 1f - albedo), 0.25f)
-            / Mathf.Sqrt(orbitalRadiusInUA);
-        return Mathf.Clamp(temperature, 50f, 5000f);
-    }
-
-    // Détermine la densité de la planète en fonction de son type
-    private float DetermineDensity(string planetType)
-    {
-        switch (planetType)
-        {
-            case "Rocheuse":
-                return 5f;
-            case "Gazeuse":
-                return 1.5f;
-            case "Glacée":
-                return 2f;
-            case "Ceinture d'astéroïdes":
-                return 3f;
-            default:
-                return 1f;
-        }
-    }
-
-    // Détermine la taille normalisée de la planète en fonction de son type et de sa masse
-    private float DetermineNormalizedSize(string bodyType, float mass)
-    {
-        switch (bodyType)
-        {
-            case "Star":
-                return Mathf.Clamp(mass, 0.5f, 5f); // Rayon entre 0.5 et 5 rayons solaires
-
-            case "Gazeuse":
-                return Mathf.Clamp(mass * 0.2f, 0.3f, 0.8f); // Rayon entre 0.3 et 0.8 rayons solaires
-
-            case "Rocheuse":
-                return Mathf.Clamp(mass * 0.02f, 0.01f, 0.05f); // Rayon entre 0.01 et 0.05 rayons solaires
-
-            case "Glacée":
-                return Mathf.Clamp(mass * 0.03f, 0.02f, 0.08f); // Rayon entre 0.02 et 0.08 rayons solaires
-
-            case "Ceinture d'astéroïdes":
-                return Mathf.Clamp(mass * 0.005f, 0.001f, 0.005f); // Rayon entre 0.001 et 0.005 rayons solaires
-
-            default:
-                return 0.1f;
-        }
-    }
-
-    // Génère un albedo pour une planète en fonction de son type
-    private float GenerateAlbedo(string planetType)
-    {
-        float baseAlbedo;
-        float variation;
-
-        switch (planetType)
-        {
-            case "Rocheuse":
-                baseAlbedo = 0.15f;
-                variation = 0.1f;
-                break;
-
-            case "Gazeuse":
-                baseAlbedo = 0.5f;
-                variation = 0.2f;
-                break;
-
-            case "Glacée":
-                baseAlbedo = 0.7f;
-                variation = 0.15f;
-                break;
-
-            case "Ceinture d'astéroïdes":
-                baseAlbedo = 0.05f;
-                variation = 0.03f;
-                break;
-
-            default:
-                baseAlbedo = 0.3f;
-                variation = 0.1f;
-                break;
-        }
-
-        float randomOffset = Random.Range(-variation, variation);
-        float albedo = Mathf.Clamp(baseAlbedo + randomOffset, 0f, 1f);
-
-        return albedo;
-    }
-    #endregion
-
+    // =========================================================================
     #region Star Properties
-    // Randomise une position sur le diagramme HR et retourne la température et la luminosité
     private void RandomizeHRPosition(out float temperature, out float luminosity)
     {
-        // Choisir aléatoirement une région du diagramme HR
-        float region = Random.value;
-
-        if (region < 0.7f) // Séquence principale (70% des étoiles)
+        float r = Random.value;
+        if (r < 0.70f)
         {
-            float mass = Random.Range(0.08f, 20f);
-            if (mass < 0.43f)
-            {
-                temperature = Random.Range(2400f, 3700f);
-                luminosity = 0.23f * Mathf.Pow(mass, 2.3f);
-            }
-            else if (mass < 0.8f)
-            {
-                temperature = Random.Range(3700f, 5200f);
-                luminosity = Mathf.Pow(mass, 4f);
-            }
-            else if (mass < 1.05f)
-            {
-                temperature = Random.Range(5200f, 6000f);
-                luminosity = Mathf.Pow(mass, 4f);
-            }
-            else if (mass < 1.4f)
-            {
-                temperature = Random.Range(6000f, 7500f);
-                luminosity = 1.4f * Mathf.Pow(mass, 3.5f);
-            }
-            else if (mass < 2.1f)
-            {
-                temperature = Random.Range(7500f, 10000f);
-                luminosity = 1.4f * Mathf.Pow(mass, 3.5f);
-            }
-            else if (mass < 16f)
-            {
-                temperature = Random.Range(10000f, 30000f);
-                luminosity = 1.4f * Mathf.Pow(mass, 3.5f);
-            }
-            else
-            {
-                temperature = Random.Range(30000f, 50000f);
-                luminosity = 32000f * mass;
-            }
+            float m = Random.Range(0.08f, 20f);
+            if      (m < 0.43f) { temperature = Random.Range(2400f,  3700f);  luminosity = 0.23f * Mathf.Pow(m, 2.3f); }
+            else if (m < 0.80f) { temperature = Random.Range(3700f,  5200f);  luminosity = Mathf.Pow(m, 4f); }
+            else if (m < 1.05f) { temperature = Random.Range(5200f,  6000f);  luminosity = Mathf.Pow(m, 4f); }
+            else if (m < 1.40f) { temperature = Random.Range(6000f,  7500f);  luminosity = 1.4f * Mathf.Pow(m, 3.5f); }
+            else if (m < 2.10f) { temperature = Random.Range(7500f,  10000f); luminosity = 1.4f * Mathf.Pow(m, 3.5f); }
+            else if (m < 16f)   { temperature = Random.Range(10000f, 30000f); luminosity = 1.4f * Mathf.Pow(m, 3.5f); }
+            else                { temperature = Random.Range(30000f, 50000f); luminosity = 32000f * m; }
         }
-        else if (region < 0.85f) // Géantes rouges (15% des étoiles)
-        {
-            temperature = Random.Range(3500f, 5000f);
-            float mass = Random.Range(0.8f, 10f);
-            luminosity = Random.Range(10f, 1000f);
-        }
-        else if (region < 0.95f) // Supergéantes rouges (10% des étoiles)
-        {
-            temperature = Random.Range(3500f, 4500f);
-            float mass = Random.Range(10f, 40f);
-            luminosity = Random.Range(1000f, 100000f);
-        }
-        else // Naines blanches (5% des étoiles)
-        {
-            temperature = Random.Range(8000f, 100000f);
-            float mass = Random.Range(0.17f, 1.4f);
-            luminosity = Random.Range(0.001f, 0.1f);
-        }
+        else if (r < 0.85f) { temperature = Random.Range(3500f,  5000f);  luminosity = Random.Range(10f,    1000f); }
+        else if (r < 0.95f) { temperature = Random.Range(3500f,  4500f);  luminosity = Random.Range(1000f,  100000f); }
+        else                { temperature = Random.Range(8000f,  100000f); luminosity = Random.Range(0.001f, 0.1f); }
     }
 
-    // Estime la masse d'une étoile en fonction de sa luminosité et de sa température
-    private float EstimateStarMass(float luminosity, float temperature)
+    private float EstimateStarMass(float lum, float temp)
     {
-        // Naines blanches
-        if (temperature >= 8000f && luminosity <= 0.1f)
-        {
-            return Random.Range(0.17f, 1.4f);
-        }
-        // Naines rouges (M) et étoiles de faible masse
-        else if (temperature < 3700f && luminosity < 0.1f)
-        {
-            return Mathf.Pow(luminosity / 0.23f, 1f / 2.3f);
-        }
-        // Étoiles de la séquence principale (types K, G, F, A, B, O)
-        else if (temperature > 3500f && temperature < 50000f)
-        {
-            // Séquence principale
-            if (luminosity < 1000f)
-            {
-                return Mathf.Pow(luminosity / 1.4f, 1f / 3.5f);
-            }
-            // Supergéantes bleues
-            else if (temperature >= 10000f && luminosity >= 1000f)
-            {
-                return Random.Range(10f, 40f);
-            }
-            else
-            {
-                return Random.Range(20f, 50f);
-            }
-        }
-        // Géantes rouges
-        else if (temperature >= 3500f && temperature <= 5000f && luminosity >= 10f && luminosity <= 1000f)
-        {
-            return Random.Range(0.8f, 10f);
-        }
-        // Supergéantes rouges
-        else if (temperature >= 3500f && temperature <= 4500f && luminosity >= 1000f)
-        {
-            return Random.Range(10f, 40f);
-        }
-        // Hypergéantes rouges
-        else if (temperature >= 3500f && temperature <= 4500f && luminosity >= 10000f)
-        {
-            return Random.Range(20f, 50f);
-        }
-        // Supergéantes bleues
-        else if (temperature >= 10000f && luminosity >= 1000f)
-        {
-            return Random.Range(10f, 40f);
-        }
-        // Valeur par défaut
-        else
-        {
-            return 1f;
-        }
+        if (temp >= 8000f && lum <= 0.1f)                                          return Random.Range(0.17f, 1.4f);
+        if (temp < 3700f  && lum < 0.1f)                                           return Mathf.Pow(lum / 0.23f, 1f / 2.3f);
+        if (temp > 3500f  && temp < 50000f && lum < 1000f)                         return Mathf.Pow(lum / 1.4f, 1f / 3.5f);
+        if (temp >= 10000f && lum >= 1000f)                                         return Random.Range(10f, 40f);
+        if (temp >= 3500f && temp <= 5000f && lum >= 10f && lum <= 1000f)          return Random.Range(0.8f, 10f);
+        if (temp >= 3500f && temp <= 4500f && lum >= 1000f)                         return Random.Range(10f, 40f);
+        return 1f;
     }
 
-    // Calcule le rayon d'une étoile en rayons solaires en fonction de sa luminosité et de sa température
-    private float CalculateStarRadius(float luminosity, float temperature)
+    private float CalculateStarRadius(float lum, float temp)
     {
-        // Constante de Stefan-Boltzmann
-        float sigma = 5.670374419f * Mathf.Pow(10, -8f);
-
-        // Luminosité en watts (L_sun = 3.828e26 W)
-        float luminosityInWatts = luminosity * 3.828f * Mathf.Pow(10, 26f);
-
-        // Rayon en mètres
-        float radiusInMeters = Mathf.Sqrt(luminosityInWatts / (4f * Mathf.PI * sigma * Mathf.Pow(temperature, 4f)));
-
-        // Rayon en rayons solaires (R_sun = 6.957e8 m)
-        float radiusInSolarRadii = radiusInMeters / (6.957f * Mathf.Pow(10, 8f));
-
-        return radiusInSolarRadii;
+        float lumW = lum * SOLAR_LUMINOSITY;
+        float rM   = Mathf.Sqrt(lumW / (4f * Mathf.PI * 5.670374419e-8f * Mathf.Pow(temp, 4f)));
+        return rM / SOLAR_RADIUS_IN_METERS;
     }
 
-    // Détermine le type spectral d'une étoile en fonction de sa luminosité et de sa température
-    private string DetermineStarType(float luminosity, float temperature)
+    private string DetermineStarType(float lum, float temp)
     {
-        // Naines blanches
-        if (luminosity < 0.1f && temperature > 8000f)
-        {
-            return "White Dwarf";
-        }
-        // Naines rouges (M)
-        else if (luminosity < 0.1f && temperature < 3700f)
-        {
-            return "M";
-        }
-        // Étoiles de type K
-        else if (luminosity < 0.6f && temperature < 5200f)
-        {
-            return "K";
-        }
-        // Étoiles de type G
-        else if (luminosity < 1.5f && temperature < 6000f)
-        {
-            return "G";
-        }
-        // Étoiles de type F
-        else if (luminosity < 5f && temperature < 7500f)
-        {
-            return "F";
-        }
-        // Étoiles de type A
-        else if (luminosity < 20f && temperature < 10000f)
-        {
-            return "A";
-        }
-        // Étoiles de type B
-        else if (luminosity < 100f && temperature < 30000f)
-        {
-            return "B";
-        }
-        // Étoiles de type O
-        else if (luminosity < 1000f && temperature >= 30000f)
-        {
-            return "O";
-        }
-        // Géantes rouges
-        else if (luminosity >= 10f && luminosity < 1000f && temperature < 5000f)
-        {
-            return "Red Giant";
-        }
-        // Supergéantes rouges
-        else if (luminosity >= 1000f && temperature < 5000f)
-        {
-            return "Red Supergiant";
-        }
-        // Hypergéantes rouges
-        else if (luminosity >= 10000f && temperature < 5000f)
-        {
-            return "Red Hypergiant";
-        }
-        // Supergéantes bleues
-        else if (luminosity >= 1000f && temperature >= 10000f)
-        {
-            return "Blue Supergiant";
-        }
-        // Hypergéantes bleues
-        else if (luminosity >= 10000f && temperature >= 10000f)
-        {
-            return "Blue Hypergiant";
-        }
-        // Par défaut, si aucune condition n'est remplie
-        else
-        {
-            return "Unknown";
-        }
+        if (lum < 0.1f   && temp > 8000f)   return "White Dwarf";
+        if (lum < 0.1f   && temp < 3700f)   return "M";
+        if (lum < 0.6f   && temp < 5200f)   return "K";
+        if (lum < 1.5f   && temp < 6000f)   return "G";
+        if (lum < 5f     && temp < 7500f)   return "F";
+        if (lum < 20f    && temp < 10000f)  return "A";
+        if (lum < 100f   && temp < 30000f)  return "B";
+        if (lum < 1000f  && temp >= 30000f) return "O";
+        if (lum >= 1000f && temp < 5000f)   return "Red Supergiant";
+        if (lum >= 10f   && temp < 5000f)   return "Red Giant";
+        if (lum >= 1000f && temp >= 10000f) return "Blue Supergiant";
+        return "Unknown";
     }
     #endregion
 
+    // =========================================================================
+    #region Planet Properties
+    private string DeterminePlanetType(float rUA, float _)
+    {
+        if      (rUA < 0.72f) return "Rocheuse";
+        else if (rUA < 1.52f) return Random.value > 0.7f ? "Ceinture d'astéroïdes" : "Rocheuse";
+        else if (rUA < 5.2f)  return "Gazeuse";
+        else                  return "Glacée";
+    }
+
+    private float DetermineTemperature(float rUA, float totalLum, float albedo)
+    {
+        if (rUA <= 0f) return 50f;
+        return Mathf.Clamp(
+            278f * Mathf.Pow(totalLum, 0.25f)
+                 * Mathf.Pow(Mathf.Max(0f, 1f - albedo), 0.25f)
+                 / Mathf.Sqrt(rUA),
+            50f, 5000f);
+    }
+
+    private float DetermineDensity(string t)
+    {
+        switch (t)
+        {
+            case "Rocheuse":              return 5f;
+            case "Gazeuse":               return 1.5f;
+            case "Glacée":                return 2f;
+            case "Ceinture d'astéroïdes": return 3f;
+            default:                      return 1f;
+        }
+    }
+
+    private float DetermineNormalizedSize(string t, float mass)
+    {
+        switch (t)
+        {
+            case "Gazeuse":               return Mathf.Clamp(mass * 0.2f,   0.3f,   0.8f);
+            case "Rocheuse":              return Mathf.Clamp(mass * 0.02f,  0.01f,  0.05f);
+            case "Glacée":                return Mathf.Clamp(mass * 0.03f,  0.02f,  0.08f);
+            case "Ceinture d'astéroïdes": return Mathf.Clamp(mass * 0.005f, 0.001f, 0.005f);
+            default:                      return 0.1f;
+        }
+    }
+
+    private float GenerateAlbedo(string t)
+    {
+        float b, v;
+        switch (t)
+        {
+            case "Rocheuse":              b = 0.15f; v = 0.10f; break;
+            case "Gazeuse":               b = 0.50f; v = 0.20f; break;
+            case "Glacée":                b = 0.70f; v = 0.15f; break;
+            case "Ceinture d'astéroïdes": b = 0.05f; v = 0.03f; break;
+            default:                      b = 0.30f; v = 0.10f; break;
+        }
+        return Mathf.Clamp(b + Random.Range(-v, v), 0f, 1f);
+    }
+    #endregion
+
+    // =========================================================================
     #region Chemical Composition and Spectrum
-    // Détermine la composition chimique d'un corps céleste en fonction de son type
     private List<ChemicalComposition> DetermineChemicalComposition(string bodyType)
     {
-        List<ChemicalComposition> composition = new List<ChemicalComposition>();
-
+        var c = new List<ChemicalComposition>();
         switch (bodyType)
         {
             case "Star":
-                // Composition typique d'une étoile (principalement hydrogène et hélium)
-                composition.Add(new ChemicalComposition { element = "H", percentage = 73.46f });
-                composition.Add(new ChemicalComposition { element = "He", percentage = 24.85f });
-                composition.Add(new ChemicalComposition { element = "O", percentage = 0.77f });
-                composition.Add(new ChemicalComposition { element = "C", percentage = 0.29f });
-                composition.Add(new ChemicalComposition { element = "Fe", percentage = 0.16f });
+                c.Add(new ChemicalComposition { element = "H",  percentage = 73.46f });
+                c.Add(new ChemicalComposition { element = "He", percentage = 24.85f });
+                c.Add(new ChemicalComposition { element = "O",  percentage = 0.77f  });
+                c.Add(new ChemicalComposition { element = "C",  percentage = 0.29f  });
+                c.Add(new ChemicalComposition { element = "Fe", percentage = 0.16f  });
                 break;
-
             case "Gazeuse":
-                // Composition typique d'une géante gazeuse (principalement hydrogène et hélium)
-                composition.Add(new ChemicalComposition { element = "H", percentage = 89.8f });
-                composition.Add(new ChemicalComposition { element = "He", percentage = 10.2f });
+                c.Add(new ChemicalComposition { element = "H",  percentage = 89.8f });
+                c.Add(new ChemicalComposition { element = "He", percentage = 10.2f });
                 break;
-
             case "Rocheuse":
-                // Composition typique d'une planète rocheuse (silicates et métaux)
-                composition.Add(new ChemicalComposition { element = "O", percentage = 46.6f });
-                composition.Add(new ChemicalComposition { element = "Si", percentage = 27.7f });
-                composition.Add(new ChemicalComposition { element = "Fe", percentage = 8.0f });
-                composition.Add(new ChemicalComposition { element = "Mg", percentage = 3.6f });
-                composition.Add(new ChemicalComposition { element = "Al", percentage = 1.5f });
+                c.Add(new ChemicalComposition { element = "O",  percentage = 46.6f });
+                c.Add(new ChemicalComposition { element = "Si", percentage = 27.7f });
+                c.Add(new ChemicalComposition { element = "Fe", percentage = 8.0f  });
+                c.Add(new ChemicalComposition { element = "Mg", percentage = 3.6f  });
+                c.Add(new ChemicalComposition { element = "Al", percentage = 1.5f  });
                 break;
-
             case "Glacée":
-                // Composition typique d'une planète glacée (eau, méthane, ammoniac)
-                composition.Add(new ChemicalComposition { element = "H", percentage = 80.0f });
-                composition.Add(new ChemicalComposition { element = "O", percentage = 10.0f });
-                composition.Add(new ChemicalComposition { element = "C", percentage = 5.0f });
-                composition.Add(new ChemicalComposition { element = "N", percentage = 5.0f });
+                c.Add(new ChemicalComposition { element = "H", percentage = 80.0f });
+                c.Add(new ChemicalComposition { element = "O", percentage = 10.0f });
+                c.Add(new ChemicalComposition { element = "C", percentage = 5.0f  });
+                c.Add(new ChemicalComposition { element = "N", percentage = 5.0f  });
                 break;
-
             default:
-                // Composition par défaut
-                composition.Add(new ChemicalComposition { element = "H", percentage = 70.0f });
-                composition.Add(new ChemicalComposition { element = "He", percentage = 28.0f });
+                c.Add(new ChemicalComposition { element = "H",  percentage = 70.0f });
+                c.Add(new ChemicalComposition { element = "He", percentage = 28.0f });
                 break;
         }
-
-        return composition;
+        return c;
     }
 
-    // Détermine le spectre d'un corps céleste en fonction de sa composition chimique
     private Spectrum DetermineSpectrum(List<ChemicalComposition> composition)
     {
-        Spectrum spectrum = new Spectrum();
-        spectrum.emissionLines = new List<SpectralLine>();
-        spectrum.absorptionLines = new List<SpectralLine>();
-
-        foreach (var element in composition)
+        Spectrum s = new Spectrum
         {
-            // Ajouter des raies spectrales typiques pour chaque élément
-            switch (element.element)
+            emissionLines   = new List<SpectralLine>(),
+            absorptionLines = new List<SpectralLine>()
+        };
+        foreach (var e in composition)
+        {
+            switch (e.element)
             {
-                case "H": // Hydrogène
-                    spectrum.emissionLines.Add(new SpectralLine { wavelength = 656.3f, intensity = element.percentage * 10f }); // Raie H-alpha
-                    spectrum.emissionLines.Add(new SpectralLine { wavelength = 486.1f, intensity = element.percentage * 8f }); // Raie H-beta
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 434.0f, intensity = element.percentage * 5f }); // Raie H-gamma
-                    break;
-
-                case "He": // Hélium
-                    spectrum.emissionLines.Add(new SpectralLine { wavelength = 587.6f, intensity = element.percentage * 5f }); // Raie D3
-                    break;
-
-                case "O": // Oxygène
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 777.4f, intensity = element.percentage * 3f });
-                    break;
-
-                case "C": // Carbone
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 477.0f, intensity = element.percentage * 2f });
-                    break;
-
-                case "Fe": // Fer
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 527.0f, intensity = element.percentage * 4f });
-                    break;
-
-                case "Si": // Silicium
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 634.7f, intensity = element.percentage * 2f });
-                    break;
-
-                case "Mg": // Magnésium
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 517.3f, intensity = element.percentage * 2f });
-                    break;
-
-                case "Al": // Aluminium
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 396.2f, intensity = element.percentage * 2f });
-                    break;
-
-                case "N": // Azote
-                    spectrum.absorptionLines.Add(new SpectralLine { wavelength = 388.4f, intensity = element.percentage * 2f });
-                    break;
+                case "H":  s.emissionLines.Add  (new SpectralLine { wavelength = 656.3f, intensity = e.percentage * 10f });
+                           s.emissionLines.Add  (new SpectralLine { wavelength = 486.1f, intensity = e.percentage *  8f });
+                           s.absorptionLines.Add(new SpectralLine { wavelength = 434.0f, intensity = e.percentage *  5f }); break;
+                case "He": s.emissionLines.Add  (new SpectralLine { wavelength = 587.6f, intensity = e.percentage *  5f }); break;
+                case "O":  s.absorptionLines.Add(new SpectralLine { wavelength = 777.4f, intensity = e.percentage *  3f }); break;
+                case "C":  s.absorptionLines.Add(new SpectralLine { wavelength = 477.0f, intensity = e.percentage *  2f }); break;
+                case "Fe": s.absorptionLines.Add(new SpectralLine { wavelength = 527.0f, intensity = e.percentage *  4f }); break;
+                case "Si": s.absorptionLines.Add(new SpectralLine { wavelength = 634.7f, intensity = e.percentage *  2f }); break;
+                case "Mg": s.absorptionLines.Add(new SpectralLine { wavelength = 517.3f, intensity = e.percentage *  2f }); break;
+                case "Al": s.absorptionLines.Add(new SpectralLine { wavelength = 396.2f, intensity = e.percentage *  2f }); break;
+                case "N":  s.absorptionLines.Add(new SpectralLine { wavelength = 388.4f, intensity = e.percentage *  2f }); break;
             }
         }
-
-        return spectrum;
+        return s;
     }
     #endregion
 
-    #region System Generation
-    private void GenerateStarSystem(string systemID)
-    {
-        if (!IsValidSystemID(systemID))
-        {
-            Debug.LogError("ID invalide !");
-            return;
-        }
+    // =========================================================================
+    #region Unit Conversions
+    private float YearsToGameSeconds(float years) => years * 10f;
 
-        ClearCurrentSystem();
-        // Si le vaisseau du joueur n'existe pas encore, l'instancier
-        if (playerShip == null && playerShipPrefab != null)
-        {
-            playerShip = Instantiate(playerShipPrefab);
-        }
-
-        int idSeed = HashIDToSeed(systemID);
-        int finalSeed = baseSeed + idSeed;
-        Random.InitState(finalSeed);
-
-        Debug.Log($"Génération du système {systemID} avec la seed finale {finalSeed}");
-
-        // Générer une étoile au centre
-        Vector3 starPosition = Vector3.zero;
-        GameObject star = celestialPool.Get().gameObject;
-        star.GetComponent<CelestialBody>()?.Reset();
-        star.transform.position = starPosition;
-        star.name = $"{systemID} A";
-
-        // Randomiser une position sur le diagramme HR
-        float starTemperature, starLuminosity;
-        RandomizeHRPosition(out starTemperature, out starLuminosity);
-
-        // Estimer la masse de l'étoile
-        float starMass = EstimateStarMass(starLuminosity, starTemperature);
-
-        // Calculer le rayon de l'étoile
-        float starRadiusInSolarRadii = CalculateStarRadius(starLuminosity, starTemperature);
-        float starSizeInGameUnits = SolarRadiusToGameUnits(starRadiusInSolarRadii);
-
-        // Appliquer la taille à l'étoile
-        star.transform.localScale = Vector3.one * starSizeInGameUnits;
-        star.tag = "Star";
-
-        // Ajuster la taille du collider de l'étoile
-        SphereCollider starCollider = star.GetComponent<SphereCollider>();
-        if (starCollider != null)
-        {
-            starCollider.radius = starSizeInGameUnits;
-        }
-        else
-        {
-            Debug.LogWarning("Pas de SphereCollider trouvé sur l'étoile !");
-        }
-
-        // Stocker les propriétés de l'étoile dans un composant CelestialBody
-        CelestialBody starBody = star.GetComponent<CelestialBody>();
-        if (starBody == null)
-        {
-            starBody = star.AddComponent<CelestialBody>();
-        }
-        starBody.bodyName = star.name;
-        starBody.bodyType = DetermineStarType(starLuminosity, starTemperature);
-        starBody.temperature = starTemperature;
-        starBody.mass = starMass;
-        starBody.radius = starSizeInGameUnits;
-        starBody.solRadius = starRadiusInSolarRadii;
-        starBody.distance = 0f;
-        starBody.starLuminosity = starLuminosity;
-        starBody.chemicalComposition = DetermineChemicalComposition("Star");
-        starBody.spectrum = DetermineSpectrum(starBody.chemicalComposition);
-
-        // Calculer la distance minimale pour les orbites en fonction du rayon de l'étoile
-        float minOrbitalDistanceInGameUnits = CalculateMinimumOrbitalDistance(starSizeInGameUnits);
-
-        // Liste pour stocker les orbites des planètes existantes
-        List<(float radius, float width)> planetOrbits = new List<(float, float)>();
-
-        // Générer entre 3 et 10 planètes aléatoires
-        int planetCount = Random.Range(3, 10);
-        for (int i = 0; i < planetCount; i++)
-        {
-            bool validOrbit = false;
-            float orbitalRadiusInGameUnits = 0f;
-            float orbitalWidthInGameUnits = 0f;
-            float planetMass = 0f;
-
-            // Essayer de générer une orbite valide
-            int attempts = 0;
-            while (!validOrbit && attempts < 100)
-            {
-                attempts++;
-                float orbitalRadiusInUA = Random.Range(minOrbitalDistanceInGameUnits / GAME_UNITS_PER_UA, 10f); // Distance en UA
-                orbitalRadiusInGameUnits = orbitalRadiusInUA * GAME_UNITS_PER_UA;
-                planetMass = Random.Range(0.1f, 5f);
-                orbitalWidthInGameUnits = CalculateOrbitalWidth(orbitalRadiusInGameUnits, planetMass, starMass);
-
-                // Vérifier si cette orbite chevauche une autre
-                validOrbit = true;
-                foreach (var orbit in planetOrbits)
-                {
-                    if (DoOrbitsOverlap(orbitalRadiusInGameUnits, orbitalWidthInGameUnits, orbit.radius, orbit.width))
-                    {
-                        validOrbit = false;
-                        break;
-                    }
-                }
-            }
-
-            if (!validOrbit)
-            {
-                Debug.LogWarning($"Impossible de trouver une orbite valide pour la planète {i} après {attempts} tentatives.");
-                continue;
-            }
-
-            // Ajouter cette orbite à la liste
-            planetOrbits.Add((orbitalRadiusInGameUnits, orbitalWidthInGameUnits));
-            planetOrbits = planetOrbits.OrderBy(orbit => orbit.radius).ToList();
-
-            // Période orbitale via la 3e loi de Kepler généralisée : T² = a³ / M_star (unités solaires)
-            float orbitalPeriodInYears = Mathf.Sqrt(Mathf.Pow(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, 3f) / starMass);
-            float orbitalPeriodInGameSeconds = YearsToGameSeconds(orbitalPeriodInYears);
-
-            float orbitalInclination = Random.Range(-15f, 15f);
-            float orbitalEccentricity = Random.Range(0f, 0.3f);
-            float initialAngle = Random.Range(0f, 360f);
-
-            // Calculer la position initiale en fonction des paramètres orbitaux
-            Vector3 orbitalPosition = CalculateOrbitalPosition(orbitalRadiusInGameUnits, orbitalInclination, orbitalEccentricity, initialAngle);
-
-            // Récupérer une planète depuis le pool
-            GameObject planet = celestialPool.Get().gameObject;
-            planet.GetComponent<CelestialBody>()?.Reset();
-            planet.transform.position = star.transform.position + orbitalPosition;
-            planet.transform.parent = star.transform;
-            planet.tag = "Planet";
-
-            string planetType = DeterminePlanetType(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, starTemperature);
-            float planetAlbedo = GenerateAlbedo(planetType);
-            float planetTemperature = DetermineTemperature(orbitalRadiusInGameUnits / GAME_UNITS_PER_UA, starLuminosity, planetAlbedo);
-            float planetDensity = DetermineDensity(planetType);
-            float planetSizeInSolarRadii = DetermineNormalizedSize(planetType, planetMass);
-            float planetSizeInGameUnits = SolarRadiusToGameUnits(planetSizeInSolarRadii);
-
-            // Appliquer la taille à l'objet (scale)
-            planet.transform.localScale = Vector3.one * planetSizeInGameUnits;
-
-            // Ajuster la taille du collider de la planète
-            SphereCollider planetCollider = planet.GetComponent<SphereCollider>();
-            if (planetCollider != null)
-            {
-                planetCollider.radius = planetSizeInGameUnits;
-            }
-            else
-            {
-                Debug.LogWarning("Pas de SphereCollider trouvé sur la planète " + planet.name + " !");
-            }
-
-            // Stocker les propriétés dans un composant CelestialBody
-            CelestialBody body = planet.GetComponent<CelestialBody>();
-            if (body == null)
-            {
-                body = planet.AddComponent<CelestialBody>();
-            }
-            body.bodyType = planetType;
-            body.temperature = planetTemperature;
-            body.mass = planetMass;
-            body.distance = orbitalRadiusInGameUnits;
-            body.density = planetDensity;
-            body.radius = planetSizeInGameUnits;
-            body.albedo = planetAlbedo;
-            body.chemicalComposition = DetermineChemicalComposition(planetType);
-            body.spectrum = DetermineSpectrum(body.chemicalComposition);
-
-            // Configurer les paramètres orbitaux
-            body.orbitalPeriod = orbitalPeriodInGameSeconds;
-            body.orbitalInclination = orbitalInclination;
-            body.orbitalRadius = orbitalRadiusInGameUnits;
-            body.orbitalEccentricity = orbitalEccentricity;
-            body.centralBody = star.transform;
-            body.orbitalAngle = initialAngle;
-        }
-
-        List<CelestialBody> children = new List<CelestialBody>();
-
-        // Parcourt tous les enfants directs
-        foreach (Transform child in star.transform)
-        {
-            children.Add(child.GetComponent<CelestialBody>());
-        }
-        children = children.OrderBy(child => child.orbitalRadius).ToList();
-        for (int i = 0; i < children.Count; i++)
-        {
-            children[i].gameObject.name = star.name + (i + 1);
-            children[i].bodyName = children[i].gameObject.name;
-            children[i].transform.SetAsLastSibling();
-        }
-
-        // Placer le vaisseau du joueur
-        PlacePlayerShip(star.transform, Math.Max(planetOrbits.Count > 0 ? planetOrbits[planetOrbits.Count - 1].radius * 1.1f : minOrbitalDistanceInGameUnits * 2f, starSizeInGameUnits * 2f));
-    }
-
-    private void PlacePlayerShip(Transform starTransform, float distance)
-    {
-        // Positionner le vaisseau du joueur
-        if (playerShip != null)
-        {
-            playerShip.transform.parent = starTransform;
-            // Azimut aléatoire
-            float randomAzimuth = Random.Range(0f, 360f);
-
-            // Calculer la position du vaisseau
-            float x = distance * Mathf.Cos(Mathf.Deg2Rad * randomAzimuth);
-            float z = distance * Mathf.Sin(Mathf.Deg2Rad * randomAzimuth);
-            Vector3 playerPosition = new Vector3(x, 0, z);
-
-            // Positionner le vaisseau
-            playerShip.transform.position = starTransform.position + playerPosition;
-
-            // Orienter le vaisseau vers l'étoile
-            playerShip.transform.LookAt(starTransform);
-            playerShip.transform.SetAsLastSibling();
-        }
-        else
-        {
-            Debug.LogError("Le prefab du vaisseau du joueur n'est pas assigné !");
-        }
-    }
-
-    private float YearsToGameSeconds(float periodInYears)
-    {
-        return periodInYears * 10f;
-    }
-
-    private float SolarRadiusToGameUnits(float radiusInSolarRadii)
-    {
-        float radiusInMeters = radiusInSolarRadii * SOLAR_RADIUS_IN_METERS;
-        float radiusInAU = radiusInMeters / AU_IN_METERS;
-        return radiusInAU * GAME_UNITS_PER_UA;
-    }
-    #endregion
-
-    #region System Cleanup
-    private void ClearCurrentSystem()
-    {
-        // Snapshot des enfants pour éviter de modifier la collection pendant l'itération
-        List<Transform> children = new List<Transform>();
-        foreach (Transform child in transform)
-            children.Add(child);
-
-        foreach (Transform child in children)
-        {
-            if (playerShip != null)
-                playerShip.transform.parent = transform;
-
-            if (!child.CompareTag("PlayerShip") && child.gameObject.activeInHierarchy)
-            {
-                // Snapshot des sous-enfants
-                List<Transform> subChildren = new List<Transform>();
-                foreach (Transform subchild in child)
-                    subChildren.Add(subchild);
-
-                foreach (Transform subchild in subChildren)
-                {
-                    subchild.parent = transform;
-                    subchild.GetComponent<CelestialBody>()?.Reset();
-                    celestialPool.ReturnToPool(subchild);
-                }
-                child.GetComponent<CelestialBody>()?.Reset();
-                celestialPool.ReturnToPool(child);
-            }
-        }
-    }
+    private float SolarRadiusToGameUnits(float rSol)
+        => (rSol * SOLAR_RADIUS_IN_METERS / AU_IN_METERS) * GAME_UNITS_PER_UA;
     #endregion
 }

@@ -287,25 +287,18 @@ public class Imager : MonoBehaviour
 /// </summary>
 public void OnBodySelected()
 {
-    int index = bodyList.value; //récupérer l'index de l'item séléctionné.
-    if (index == 0)
-    {
-        // Aucune sélection (option par défaut)
-        _selectedBody = null;
-        return;
-    }
-
-    // Mettre à jour le corps sélectionné
-    _selectedBody = _celestialBodies[index - 1];
+    int idx = bodyList.value - 1; // -1 pour l'offset du "None"
+    CelestialBody selected = (idx >= 0 && idx < _celestialBodies.Count)
+                       ? _celestialBodies[idx]
+                       : null;
 
     // Calculer les offsets pour centrer l'objet sélectionné
-    if (_selectedBody != null)
+    if (selected != null)
     {
-        offsetAzimuth = _selectedBody.azimuth;
-        offsetElevation = _selectedBody.elevation;
+        offsetAzimuth = selected.azimuth;
+        offsetElevation = selected.elevation;
+        Debug.Log("Corps sélectionné : " + selected.bodyName);
     }
-
-    Debug.Log("Corps sélectionné : " + _selectedBody.bodyName);
 }
 
 
@@ -356,22 +349,26 @@ public void OnBodySelected()
     private void FindAllCelestialBodies()
     {
         CelestialBody[] bodies = FindObjectsByType<CelestialBody>(FindObjectsSortMode.None);
-        if(!_celestialBodies.Contains(bodies.First<CelestialBody>()))
-        {
-            _celestialBodies.Clear();
-            _celestialBodies.AddRange(bodies);
-            bodyList.ClearOptions();
-            List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
-            foreach (CelestialBody body in _celestialBodies)
-            {
-                options.Add(new TMP_Dropdown.OptionData(body.bodyName));
-            }
-            options = options.OrderBy(option => option.text).ToList();
-            options.Insert(0,new TMP_Dropdown.OptionData("None"));
-            bodyList.options = options;
-            bodyList.value = 0;
-            OnBodySelected();
-        }
+
+        // Refresh si le contenu a changé (nouveau système ou pool recyclé)
+        bool needsRefresh = bodies.Length != _celestialBodies.Count
+                        || bodies.Any(b => !_celestialBodies.Contains(b));
+        if (!needsRefresh) return;
+
+        // Filtrer les corps sans nom (pas encore configurés) et les barycentres
+        _celestialBodies = bodies
+            .Where(b => !string.IsNullOrEmpty(b.bodyName))
+            .OrderBy(b => b.bodyName)
+            .ToList();
+
+        List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
+        options.Add(new TMP_Dropdown.OptionData("None"));
+        foreach (CelestialBody body in _celestialBodies)
+            options.Add(new TMP_Dropdown.OptionData(body.bodyName));
+
+        bodyList.options = options;
+        bodyList.value   = 0;
+        OnBodySelected();
     }
 
     /// <summary>

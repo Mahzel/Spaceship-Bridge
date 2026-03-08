@@ -120,7 +120,11 @@ public class Imager : MonoBehaviour
     private Texture2D _debugTexture;
 
 
-    float maxExpectedLuminosity = 1000f;
+    /// <summary>
+    /// Current auto-exposure reference: the brightest apparent luminosity visible
+    /// in the FOV. Updated once per full scan pass via ComputeAutoExposure().
+    /// </summary>
+    private float _autoExposureMax = GameConstants.IMAGER_AUTO_EXPOSURE_FLOOR;
     // =========================================================================
     #endregion
 
@@ -137,7 +141,7 @@ public class Imager : MonoBehaviour
         blockSize = (int)resSlider.value;
         fieldOfView = fovSlider.value;
         sensorGain = gainSlider.value;
-        maxExpectedLuminosity = dynSlider.value;
+        _autoExposureMax = GameConstants.IMAGER_AUTO_EXPOSURE_FLOOR;
         _displayWidth = (int)display.rectTransform.rect.width;
         _displayHeight = (int)display.rectTransform.rect.height;
         _scanResolution = _displayWidth / blockSize;
@@ -240,10 +244,11 @@ public class Imager : MonoBehaviour
         }
     }
 
-    public void UpdateDynamic()
-    {
-        maxExpectedLuminosity = dynSlider.value;
-    }
+    /// <summary>
+    /// dynSlider is now an exposure multiplier (1 = auto, >1 = deliberate under-exposure).
+    /// The label in the UI should reflect this (e.g. "Exposure x1.0").
+    /// </summary>
+    public void UpdateDynamic() { /* multiplier read directly from dynSlider.value at render time */ }
 
     /// <summary>
     /// Met à jour la taille des blocs (appelé par un slider UI).
@@ -390,6 +395,32 @@ public void OnBodySelected()
         }
     }
 
+/// <summary>
+/// Scans all celestial bodies currently in the FOV and returns the brightest
+/// apparent luminosity. Used as the auto-exposure reference for this scan pass.
+/// Smoothly lerps toward the new max to avoid harsh jumps between passes.
+/// </summary>
+private void ComputeAutoExposure()
+{
+    float fovHalf = fieldOfView / 2f;
+    float sceneMax = GameConstants.IMAGER_AUTO_EXPOSURE_FLOOR;
+
+    foreach (CelestialBody body in _celestialBodies)
+    {
+        if (body.distance <= 0f || body.distance > maxScanDistance) continue;
+
+        float dAz = Mathf.Abs(body.azimuth   - offsetAzimuth);
+        float dEl = Mathf.Abs(body.elevation - offsetElevation);
+        if (dAz > fovHalf || dEl > fovHalf) continue;
+
+        if (body.apparentLuminosity > sceneMax)
+            sceneMax = body.apparentLuminosity;
+    }
+
+    // Smooth adaptation — avoids sudden brightness jumps when a star enters/leaves FOV
+    _autoExposureMax = Mathf.Lerp(_autoExposureMax, sceneMax, GameConstants.IMAGER_AUTO_EXPOSURE_LERP);
+}
+
 private float CalculateDirectionalLuminosity(float azimuth, float elevation)
 {
     float totalLuminosity = UnityEngine.Random.Range(0, 0.005f);
@@ -429,7 +460,9 @@ private float CalculateDirectionalLuminosity(float azimuth, float elevation)
         totalLuminosity += body.apparentLuminosity * weight;
     }
 
-    return ApplyCompression(new float[]{ totalLuminosity }, 0, dynamicCompressionFactor, maxExpectedLuminosity)[0];
+    // dynSlider.value acts as an exposure multiplier: 1 = auto, >1 = under-expose.
+    float exposureRef = Mathf.Max(_autoExposureMax * dynSlider.value, GameConstants.IMAGER_AUTO_EXPOSURE_FLOOR);
+    return ApplyCompression(new float[]{ totalLuminosity }, 0, dynamicCompressionFactor, exposureRef)[0];
 }
 
 
@@ -602,6 +635,10 @@ private IEnumerator ScanRoutine()
     
     while (_isScanning)
     {
+        // Update auto-exposure once per full scan pass, not per pixel
+        FindAllCelestialBodies();
+        ComputeAutoExposure();
+
         for (int sy = 0; sy < _scanResolution; sy++)
         {
             _currentScanLine = sy * blockSize;

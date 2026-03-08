@@ -17,7 +17,7 @@ public class WaterfallScreen : ComputerScreen
     public float maxValue = 100f;            // Valeur maximale (100)
     public float updateInterval = 2f;        // Intervalle d'ajout de ligne (5 secondes)
     private int pixelSize = 1;
-    private int integration = 20;
+    private int integration = GameConstants.WATERFALL_INTEGRATION_MAX;
     ArrayList integrator;
     int integrationCount = 1;
 
@@ -62,7 +62,7 @@ public class WaterfallScreen : ComputerScreen
         // Bruit de fond gaussien (distribution plus réaliste que uniforme)
         for (int i = 0; i < baseNoise.Length; i++)
         {
-            baseNoise[i] = GaussianNoise(0f, 0.002f);
+            baseNoise[i] = GaussianNoise(0f, GameConstants.NOISE_STDDEV);
         }
 
         // Récupère tous les objets du système (étoiles et planètes)
@@ -122,8 +122,8 @@ public class WaterfallScreen : ComputerScreen
     private void SpreadSignal(float[] buffer, float azimuth, float signal)
     {
         int centerIndex = AzimuthToIndex(azimuth);
-        float spreadSigma = 1.2f; // écart-type en bins
-        for (int offset = -2; offset <= 2; offset++)
+        float spreadSigma = GameConstants.PSF_SIGMA;
+        for (int offset = -GameConstants.PSF_SPREAD_HALF_WIDTH; offset <= GameConstants.PSF_SPREAD_HALF_WIDTH; offset++)
         {
             int idx = (centerIndex + offset + buffer.Length) % buffer.Length;
             float weight = Mathf.Exp(-0.5f * (offset * offset) / (spreadSigma * spreadSigma));

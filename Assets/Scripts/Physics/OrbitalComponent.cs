@@ -55,7 +55,7 @@ public class OrbitalComponent : MonoBehaviour
         {
             if (focus != null)
             {
-                _meanAnomaly += (360f / orbitalPeriod) * Time.deltaTime / 8760f;
+                _meanAnomaly += (360f / orbitalPeriod) * Time.deltaTime * GameConstants.TIME_MULTIPLIER;
                 if (_meanAnomaly >= 360f) _meanAnomaly -= 360f;
 
                 transform.position = focus.position + CalculateOrbitalPosition(_meanAnomaly);
@@ -110,10 +110,10 @@ public class OrbitalComponent : MonoBehaviour
     {
         float M = meanAnomalyDeg * Mathf.Deg2Rad;
         float E = M;
-        for (int i = 0; i < 100; i++)
+        for (int i = 0; i < GameConstants.KEPLER_MAX_ITERATIONS; i++)
         {
             float delta = E - e * Mathf.Sin(E) - M;
-            if (Mathf.Abs(delta) < 1e-6f) break;
+            if (Mathf.Abs(delta) < GameConstants.KEPLER_CONVERGENCE) break;
             E -= delta / (1f - e * Mathf.Cos(E));
         }
         return E; // radians

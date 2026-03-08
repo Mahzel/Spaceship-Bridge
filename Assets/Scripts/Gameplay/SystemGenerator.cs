@@ -10,13 +10,13 @@ using System.Linq;
 public class SystemManager : MonoBehaviour
 {
     #region Constants
-    private const int    DEFAULT_BASE_SEED      = 645865465;
-    private const float  GAME_UNITS_PER_UA      = 100f;
-    private const float  SOLAR_RADIUS_IN_METERS = 6.957e8f;
-    private const float  AU_IN_METERS           = 1.496e11f;
-    private const float  SOLAR_LUMINOSITY       = 3.828e26f;
+    private const int    DEFAULT_BASE_SEED      = GameConstants.DEFAULT_BASE_SEED;
+    private const float  GAME_UNITS_PER_UA      = GameConstants.GAME_UNITS_PER_UA;
+    private const float  SOLAR_RADIUS_IN_METERS = GameConstants.SOLAR_RADIUS_IN_METERS;
+    private const float  AU_IN_METERS           = GameConstants.AU_IN_METERS;
+    private const float  SOLAR_LUMINOSITY       = GameConstants.SOLAR_LUMINOSITY;
     private readonly char[] LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray();
-    private const int POOL_SIZE = 20;
+    private const int POOL_SIZE = GameConstants.POOL_SIZE;
     #endregion
 
     #region Fields
@@ -84,7 +84,8 @@ public class SystemManager : MonoBehaviour
         // --- Multiplicité ---
         // 50% simples | 40% binaires | 10% trinaires
         float roll     = Random.value;
-        int   starCount = roll < 0.50f ? 1 : roll < 0.90f ? 2 : 3;
+        int   starCount = roll < GameConstants.STAR_SINGLE_THRESHOLD ? 1
+                        : roll < GameConstants.STAR_BINARY_THRESHOLD ? 2 : 3;
 
         Transform systemRoot;
         float     totalStarMass;
@@ -131,7 +132,7 @@ public class SystemManager : MonoBehaviour
 
         if (count == 2)
         {
-            float separationUA = Random.Range(5f, 80f);
+            float separationUA = Random.Range(GameConstants.BINARY_SEPARATION_MIN_UA, GameConstants.BINARY_SEPARATION_MAX_UA);
             var (starA, starB) = GenerateBinaryPair(
                 systemID, rootBC.transform, separationUA, "A", "B");
 
@@ -144,8 +145,8 @@ public class SystemManager : MonoBehaviour
         else // count == 3
         {
             // Paire AB + étoile C lointaine
-            float sepAB = Random.Range(2f, 20f);
-            float sepC  = Random.Range(100f, 500f);
+            float sepAB = Random.Range(GameConstants.TRINARY_INNER_SEPARATION_MIN_UA, GameConstants.TRINARY_INNER_SEPARATION_MAX_UA);
+            float sepC  = Random.Range(GameConstants.TRINARY_OUTER_SEPARATION_MIN_UA, GameConstants.TRINARY_OUTER_SEPARATION_MAX_UA);
 
             GameObject abBC  = CreateBarycenter($"{systemID}_BC_AB", rootBC.transform, position);
             Barycenter abBCc = abBC.GetComponent<Barycenter>();
@@ -180,7 +181,7 @@ public class SystemManager : MonoBehaviour
         // Planètes circumbinaires : règle P-type, a > 3.5 × séparation
         float minOrbitUA = Mathf.Max(
             CalculateMinimumOrbitalDistance(maxRadiusGame) / GAME_UNITS_PER_UA,
-            3.5f);
+            GameConstants.CIRCUMBINARY_MIN_ORBIT_FACTOR);
 
         return (rootBC.transform, totalMass, minOrbitUA);
     }
@@ -220,8 +221,8 @@ public class SystemManager : MonoBehaviour
 
         orb.focus              = focus;
         orb.semiMajorAxis      = sma;
-        orb.eccentricity       = Random.Range(0f, 0.5f);
-        orb.inclination        = Random.Range(-10f, 10f);
+        orb.eccentricity       = Random.Range(0f, GameConstants.STAR_ECCENTRICITY_MAX);
+        orb.inclination        = Random.Range(-GameConstants.STAR_INCLINATION_MAX, GameConstants.STAR_INCLINATION_MAX);
         orb.longitudeAscNode   = Random.Range(0f, 360f);
         orb.argumentPeriapsis  = isBodyA ? 0f   : 180f;
         orb.meanAnomalyAtEpoch = isBodyA ? 0f   : 180f;
@@ -294,8 +295,10 @@ public class SystemManager : MonoBehaviour
         float totalLuminosity = GetTotalSystemLuminosity(systemRoot);
         List<(float radius, float width)> orbits = new List<(float, float)>();
 
-        int planetCount = Random.Range(3, 10);
-        int nameIdx     = 1;
+        // Per-parent planet counters so each star gets its own numbering (A-1, A-2, B-1...)
+        Dictionary<Transform, int> parentPlanetIndex = new Dictionary<Transform, int>();
+
+        int planetCount = Random.Range(GameConstants.PLANET_COUNT_MIN, GameConstants.PLANET_COUNT_MAX);
 
         for (int i = 0; i < planetCount; i++)
         {
@@ -305,12 +308,12 @@ public class SystemManager : MonoBehaviour
             float pMass   = 0f;
             int   tries   = 0;
 
-            while (!valid && tries < 100)
+            while (!valid && tries < GameConstants.PLANET_ORBIT_MAX_TRIES)
             {
                 tries++;
-                float rUA = Random.Range(minOrbitUA, minOrbitUA + 50f);
+                float rUA = Random.Range(minOrbitUA, minOrbitUA + GameConstants.PLANET_ORBIT_SPREAD_UA);
                 rGame  = rUA * GAME_UNITS_PER_UA;
-                pMass  = Random.Range(0.1f, 5f);
+                pMass  = Random.Range(GameConstants.PLANET_MASS_MIN, GameConstants.PLANET_MASS_MAX);
                 width  = CalculateOrbitalWidth(rGame, pMass, totalStarMass);
                 valid  = orbits.All(o => !DoOrbitsOverlap(rGame, width, o.radius, o.width));
             }
@@ -329,13 +332,24 @@ public class SystemManager : MonoBehaviour
             float  sizeSol   = DetermineNormalizedSize(pType, pMass);
             float  sizeGame  = SolarRadiusToGameUnits(sizeSol);
 
+            // Hierarchy & naming: find the most specific parent (star or barycenter)
+            Transform orbitParent = FindOrbitParent(systemRoot, rGame);
+            string    parentShort = orbitParent.name.Replace(systemID, "").Trim();
+            if (string.IsNullOrEmpty(parentShort)) parentShort = orbitParent.name;
+
+            if (!parentPlanetIndex.ContainsKey(orbitParent))
+                parentPlanetIndex[orbitParent] = 1;
+            int planetNum = parentPlanetIndex[orbitParent]++;
+
+            string planetName = $"{systemID} {parentShort}-{planetNum}";
+
             GameObject planet = celestialPool.Get().gameObject;
             planet.GetComponent<CelestialBody>()?.Reset();
-            planet.transform.SetParent(systemRoot);
-            planet.transform.position   = systemRoot.position;
+            planet.transform.SetParent(orbitParent);
+            planet.transform.position   = orbitParent.position;
             planet.transform.localScale = Vector3.one * sizeGame;
-            planet.tag = "Planet";
-            planet.name = $"{systemID} {nameIdx++}";
+            planet.tag  = "Planet";
+            planet.name = planetName;
 
             SphereCollider col = planet.GetComponent<SphereCollider>();
             if (col != null) col.radius = sizeGame;
@@ -352,16 +366,62 @@ public class SystemManager : MonoBehaviour
             body.spectrum            = DetermineSpectrum(body.chemicalComposition);
 
             OrbitalComponent orb = planet.GetComponent<OrbitalComponent>() ?? planet.AddComponent<OrbitalComponent>();
-            orb.focus              = systemRoot;
+            orb.focus              = orbitParent;
             orb.semiMajorAxis      = rGame;
-            orb.eccentricity       = Random.Range(0f, 0.3f);
-            orb.inclination        = Random.Range(-15f, 15f);
+            orb.eccentricity       = Random.Range(0f, GameConstants.PLANET_ECCENTRICITY_MAX);
+            orb.inclination        = Random.Range(-GameConstants.PLANET_INCLINATION_MAX, GameConstants.PLANET_INCLINATION_MAX);
             orb.longitudeAscNode   = Random.Range(0f, 360f);
             orb.argumentPeriapsis  = Random.Range(0f, 360f);
             orb.meanAnomalyAtEpoch = Random.Range(0f, 360f);
             orb.orbitalPeriod      = YearsToGameSeconds(period);
             orb.Reset();
         }
+    }
+
+    /// <summary>
+    /// Finds the most appropriate Transform to parent a planet under, given its orbital radius.
+    /// Single-star: always the star. Multi-star: S-type planets go under the nearest star,
+    /// circumbinary/circumtriple stay under the root barycenter.
+    /// S-type condition: planetOrbit <= STYPE_ORBIT_THRESHOLD * star's own orbital radius.
+    /// </summary>
+    private Transform FindOrbitParent(Transform systemRoot, float planetOrbitGame)
+    {
+        List<(Transform t, float starOrbit)> stars = new List<(Transform, float)>();
+
+        foreach (Transform child in systemRoot)
+        {
+            CelestialBody cb = child.GetComponent<CelestialBody>();
+            if (cb != null && cb.starLuminosity > 0f)
+            {
+                OrbitalComponent oc = child.GetComponent<OrbitalComponent>();
+                stars.Add((child, oc != null ? oc.semiMajorAxis : 0f));
+                continue;
+            }
+            Barycenter bc = child.GetComponent<Barycenter>();
+            if (bc != null)
+            {
+                foreach (Transform grandChild in child)
+                {
+                    CelestialBody gcb = grandChild.GetComponent<CelestialBody>();
+                    if (gcb != null && gcb.starLuminosity > 0f)
+                    {
+                        OrbitalComponent oc = grandChild.GetComponent<OrbitalComponent>();
+                        stars.Add((grandChild, oc != null ? oc.semiMajorAxis : 0f));
+                    }
+                }
+            }
+        }
+
+        if (stars.Count == 1)
+            return stars[0].t;
+
+        foreach (var (starTransform, starOrbit) in stars)
+        {
+            if (starOrbit > 0f && planetOrbitGame <= GameConstants.STYPE_ORBIT_THRESHOLD * starOrbit)
+                return starTransform;
+        }
+
+        return systemRoot;
     }
 
     private float GetTotalSystemLuminosity(Transform root)
@@ -651,7 +711,11 @@ public class SystemManager : MonoBehaviour
 
     // =========================================================================
     #region Unit Conversions
-    private float YearsToGameSeconds(float years) => years * 10f;
+    /// <summary>
+    /// Converts an orbital period in years to real seconds.
+    /// OrbitalComponent multiplies by GameConstants.TIME_MULTIPLIER at runtime.
+    /// </summary>
+    private float YearsToGameSeconds(float years) => years * GameConstants.SECONDS_PER_YEAR;
 
     private float SolarRadiusToGameUnits(float rSol)
         => (rSol * SOLAR_RADIUS_IN_METERS / AU_IN_METERS) * GAME_UNITS_PER_UA;

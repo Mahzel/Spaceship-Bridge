@@ -171,7 +171,11 @@ public class CelestialBody : MonoBehaviour
         float fluxAtPlanet = star.starLuminosity / (dStarToPlanet * dStarToPlanet);
         float r = radius / UA_TO_GAME_UNITS;
 
-        return fluxAtPlanet * albedo * phase * (r * r) / (dObserver * dObserver);
+        // Raw reflected flux — physically correct but ~8-9 orders of magnitude below
+        // stellar flux. PLANET_LUMINOSITY_SENSOR_GAIN simulates the per-sector sensitivity
+        // boost applied by real astronomical imagers to make planets visible alongside stars.
+        return fluxAtPlanet * albedo * phase * (r * r) / (dObserver * dObserver)
+               * GameConstants.PLANET_LUMINOSITY_SENSOR_GAIN;
     }
 
     /// <summary>

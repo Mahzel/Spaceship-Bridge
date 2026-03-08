@@ -14,8 +14,8 @@ public class Spectrometer : MonoBehaviour
 
     #region Parameters
     [Header("Spectrometer Parameters")]
-    public float wavelengthMin = 380f; // Longueur d'onde min (nm)
-    public float wavelengthMax = 780f; // Longueur d'onde max (nm)
+    public float wavelengthMin = GameConstants.SPECTRUM_WAVELENGTH_MIN;
+    public float wavelengthMax = GameConstants.SPECTRUM_WAVELENGTH_MAX;
     public Color curveColor = Color.green; // Couleur de la courbe
 
     private int spectrumWidth = 256; // Largeur de la texture du spectre (en pixels)
@@ -218,7 +218,7 @@ public class Spectrometer : MonoBehaviour
 
         // Bruit gaussien cohérent avec le reste du pipeline (σ = 0.002)
         for (int i = 0; i < spectrumWidth; i++)
-            dataPoints[i] = GaussianNoise(0f, 0.002f);
+            dataPoints[i] = GaussianNoise(0f, GameConstants.NOISE_STDDEV);
 
         // Raies d'émission et d'absorption étalées sur ±2 pixels (slit function gaussienne)
         foreach (SpectralLine s in target.spectrum.emissionLines)
@@ -270,8 +270,8 @@ public class Spectrometer : MonoBehaviour
     // Étale un signal sur ±2 pixels avec une PSF gaussienne (σ = 1.2 px)
     private void SpreadSpectralSignal(float[] buffer, int center, float amplitude)
     {
-        float sigma = 1.2f;
-        for (int offset = -2; offset <= 2; offset++)
+        float sigma = GameConstants.PSF_SIGMA;
+        for (int offset = -GameConstants.PSF_SPREAD_HALF_WIDTH; offset <= GameConstants.PSF_SPREAD_HALF_WIDTH; offset++)
         {
             int idx = center + offset;
             if (idx < 0 || idx >= buffer.Length) continue;

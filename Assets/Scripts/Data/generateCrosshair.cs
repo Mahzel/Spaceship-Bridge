@@ -21,7 +21,7 @@ public class CrosshairGenerator : MonoBehaviour
     // Génère une texture de mire
     private Texture2D GenerateCrosshairTexture(int width, int height, bool isZoomMode)
     {
-        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        Texture2D texture = new(width, height, TextureFormat.RGBA32, false);
         Color[] pixels = new Color[width * height];
 
         // Remplir avec transparence totale
@@ -34,7 +34,7 @@ public class CrosshairGenerator : MonoBehaviour
         int centerX = width / 2;
         int centerY = height / 2;
         int lineThickness = 2;
-        Color lineColor = new Color(1, 0, 0, 0.3f); // Rouge semi-transparent
+        Color lineColor = new(1, 0, 0, 0.3f); // Rouge semi-transparent
 
         if (isZoomMode)
         {

@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b24c5b36a32e37b4d86f7a8af842ab39, type: 3}
+  m_Name: UITheme
+  m_EditorClassIdentifier: Assembly-CSharp::UITheme
+  font: {fileID: 0}
+  panelColor: {r: 0.02, g: 0.07, b: 0.03, a: 0.94}
+  dimColor: {r: 0, g: 0, b: 0, a: 0.7}
+  barBack: {r: 0.06, g: 0.12, b: 0.07, a: 1}
+  text: {r: 0.78, g: 0.98, b: 0.8, a: 1}
+  textDim: {r: 0.4, g: 0.58, b: 0.42, a: 1}
+  accent: {r: 0.35, g: 0.95, b: 0.45, a: 1}
+  accentDim: {r: 0.13, g: 0.42, b: 0.18, a: 1}
+  good: {r: 0.55, g: 1, b: 0.35, a: 1}
+  warning: {r: 1, g: 0.7, b: 0.2, a: 1}
+  danger: {r: 1, g: 0.3, b: 0.3, a: 1}
+  hydrogenColor: {r: 0.4, g: 0.85, b: 0.85, a: 1}
+  storageColor: {r: 0.65, g: 0.9, b: 0.4, a: 1}
+  buttonNormal: {r: 0.06, g: 0.14, b: 0.08, a: 1}
+  buttonHover: {r: 0.12, g: 0.24, b: 0.14, a: 1}
+  buttonPressed: {r: 0.04, g: 0.1, b: 0.05, a: 1}
+  fontSizeSmall: 15
+  fontSizeBody: 20
+  fontSizeTitle: 36
+  padding: 12
+  spacing: 8
+  statusBarHeight: 76

@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 75a364bf397d25b499e25d02bac11d99, type: 3}
+  m_Name: ProbeSpec
+  m_EditorClassIdentifier: Assembly-CSharp::ProbeSpec
+  powerCapacity: 1000
+  coreDraw: 0.5
+  defaultWaterfallDraw: 1
+  solarOutput: 1
+  hydrogenCapacity: 100
+  storageCapacity: 100
+  hydrogenPerKmS: 1
+  stubSize: 1
+  rawSizePerDay: 0.25
+  rawValuePerDay: 0.1
+  compressedSizeFactor: 0.4
+  compressedValueFactor: 0.6
+  reactorOutput: 6
+  reactorHydrogenPerDay: 0.15
+  hydrogenPerLy: 5
+  jumpDaysPerLy: 30
+  jumpScanLy: 25
+  txRangeLy: 6
+  txPeakPower: 20
+  txRate: 5
+  lastGaspEnergy: 30

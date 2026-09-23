@@ -31,6 +31,15 @@ public class CelestialBody : MonoBehaviour
 
     public List<ChemicalComposition> chemicalComposition;
     public Spectrum spectrum;
+
+    [Header("Atmosphère / surface")]
+    public Atmosphere atmosphere;
+    public float surfaceTemperature; // température de surface réelle (effet de serre) - `temperature` reste l'équilibre radiatif
+    public string surfaceClass;      // ex: "Temperate", "Hellscape", "Frozen", "Gas Giant" (voir SystemFactory.DetermineSurfaceClass)
+
+    [Header("Diversité stellaire (étoiles uniquement)")]
+    public float metallicity; // dex, style [Fe/H]
+    public float ageGyr;
     #endregion
 
     #region Observed Properties (read-only for sensors)

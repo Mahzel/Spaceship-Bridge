@@ -1,233 +1,248 @@
+using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using System.Collections;
-using System.Collections.Generic;
-using static Utils;
 
-public class WaterfallScreen : ComputerScreen
+/// <summary>
+/// Renders the waterfall sensor. Fully code-built (UIKit), same plain-class pattern as the other three sensor
+/// screens. All the actual work (line generation, CFAR, tracking) lives in WaterfallProcessor
+/// (Game.State.Waterfall), ticked every real frame from RunDriver regardless of which console mode is showing
+/// — this screen just draws whatever the processor already has. Unlike Imager/Spectrometer, Hide() is a
+/// no-op: switching away from this mode does NOT pause detection, only the sensor's own power button does
+/// that (see WaterfallProcessor's own doc comment for why).
+/// </summary>
+public sealed class WaterfallScreen
 {
-    [Header("Réglages du Waterfall")]
-    public RectTransform waterfallContainer; // Conteneur du waterfall
-    public GameObject waterfallLinePrefab;   // Prefab d'une ligne du waterfall
-    public GameObject waterfallPointPrefab;  // Prefab d'un point du waterfall
-    public GameObject sizeSlider;
-    public GameObject integrationToggle;
-    public int pointCount;
-    public int lineCount = 20;               // Nombre de lignes visibles
-    public float maxValue = 100f;            // Valeur maximale (100)
-    public float updateInterval = 2f;        // Intervalle d'ajout de ligne (5 secondes)
-    private int pixelSize = 1;
-    private int integration = GameConstants.WATERFALL_INTEGRATION_MAX;
-    ArrayList integrator;
-    int integrationCount = 1;
+    private const int DisplayW = 860;
+    private const int DisplayH = 260;
+    private const int DspH = 70;
+    private const float DspTickWidth = 1.5f;
 
-    private List<GameObject> waterfallLines = new List<GameObject>();
+    private RawImage _image;
+    private TrackOverlay _overlay;
+    private LineGraphic _dspLine;
+    private RectTransform _dspArea;
+    private float[] _dspNormalized = new float[0];
+    private readonly List<Image> _dspTicks = new List<Image>();
 
-    // Démarre la coroutine pour ajouter des lignes automatiquement
-    protected override void Start()
+    private Button _powerButton, _integrationButton;
+    private TextMeshProUGUI _powerLabel, _integrationLabel, _pixelLabel;
+    private bool _integrationOn = true;
+    private int _pixelSize = 1;
+
+    private WaterfallProcessor Processor { get { return Game.State != null ? Game.State.Waterfall : null; } }
+
+    public GameObject Build(Transform parent)
     {
-        pixelSize = (int)sizeSlider.GetComponent<Slider>().value;
-        pointCount = (int)(waterfallContainer.rect.width)/pixelSize;
-        lineCount = (int)(waterfallContainer.rect.height)/pixelSize;
-        integrator = new ArrayList();
-        GenerateRandomLine(); // Génère une ligne initiale
-        StartCoroutine(AddLineRoutine());
+        UITheme t = UITheme.Current;
+
+        RectTransform root = UIKit.Node("Waterfall", parent);
+        UIKit.Size(root, flexibleWidth: 1f);
+        var v = UIKit.VStack(root, t.spacing, 0);
+        v.childAlignment = TextAnchor.UpperLeft;
+        var fit = root.gameObject.AddComponent<ContentSizeFitter>();
+        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        fit.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        BuildDisplay(root);
+        BuildDsp(root);
+        BuildControls(root);
+
+        WaterfallProcessor p = Processor;
+        if (p != null) _integrationOn = p.IntegrationOn;
+
+        return root.gameObject;
     }
 
-    // Coroutine pour ajouter une ligne toutes les 5 secondes
-    private IEnumerator AddLineRoutine()
+    private void BuildDisplay(Transform parent)
     {
-        while (true)
-        {
-            yield return new WaitForSeconds(updateInterval);
-            pixelSize = (int)sizeSlider.GetComponent<Slider>().value;
-            pointCount = (int)(waterfallContainer.rect.width)/pixelSize;
-            lineCount = (int)(waterfallContainer.rect.height)/pixelSize;
-            GenerateRandomLine();
-        }
+        RectTransform area = UIKit.Node("DisplayArea", parent);
+        UIKit.Size(area, preferredWidth: DisplayW, minHeight: DisplayH);
+
+        _image = UIKit.AddRawImage(area, "Waterfall", Color.white);
+        UIKit.Stretch(_image.rectTransform);
+        _image.raycastTarget = true; // needed to receive the mark-a-bearing click below
+        var imgClick = _image.gameObject.AddComponent<ClickForwarder>();
+        imgClick.OnClick = OnDisplayClicked;
+
+        _overlay = new TrackOverlay();
+        _overlay.Build(area);
     }
 
-    public void onSizeChange()
+    private void BuildDsp(Transform parent)
     {
-        integrator = new ArrayList();
-        integrationCount = 1;
-        ClearWaterfall();
+        UITheme t = UITheme.Current;
+        Image areaImage = UIKit.AddPanel(parent, "DspArea", t.barBack);
+        RectTransform area = areaImage.rectTransform;
+        UIKit.Size(area, preferredWidth: DisplayW, minHeight: DspH);
+        _dspArea = area;
+
+        areaImage.raycastTarget = true; // the DSP strip can mark a bearing too
+        var dspClick = area.gameObject.AddComponent<ClickForwarder>();
+        dspClick.OnClick = OnDisplayClicked;
+
+        RectTransform lineRt = UIKit.Node("DSPLine", area);
+        UIKit.Stretch(lineRt, 2f, 2f, 2f, 2f);
+        _dspLine = lineRt.gameObject.AddComponent<LineGraphic>();
+        _dspLine.raycastTarget = false;
+        _dspLine.color = t.accent;
     }
 
-    // Génère une ligne pour le waterfall
-    public void GenerateRandomLine()
+    // Click-to-mark: the display and the DSP strip are both full-width (DisplayW), so the same local-x-to-
+    // world-bearing conversion applies to either. The waterfall is now world-bearing-centered (0,0 = the
+    // rect's pivot, which UIKit.Node leaves at the default 0.5,0.5), so no heading offset is needed here.
+    private void OnDisplayClicked(Vector2 localPoint, RectTransform rt)
     {
-        float[] baseNoise = new float[pointCount];
+        if (Game.State == null) return;
+        WaterfallProcessor p = Processor;
+        if (p == null) return;
 
-        // Bruit de fond gaussien (distribution plus réaliste que uniforme)
-        for (int i = 0; i < baseNoise.Length; i++)
-        {
-            baseNoise[i] = GaussianNoise(0f, GameConstants.NOISE_STDDEV);
-        }
-
-        // Récupère tous les objets du système (étoiles et planètes)
-        GameObject[] stars   = GameObject.FindGameObjectsWithTag("Star");
-        GameObject[] planets = GameObject.FindGameObjectsWithTag("Planet");
-
-        // Ajoute le signal des corps célestes avec étalement angulaire gaussien (±2 bins)
-        foreach (GameObject star in stars)
-        {
-            var (azimuth, _, _) = star.GetComponent<CelestialBody>().GetData();
-            float signal = star.GetComponent<CelestialBody>().apparentLuminosity;
-            SpreadSignal(baseNoise, azimuth, signal);
-        }
-        foreach (GameObject planet in planets)
-        {
-            var (azimuth, _, _) = planet.GetComponent<CelestialBody>().GetData();
-            float signal = planet.GetComponent<CelestialBody>().apparentLuminosity;
-            SpreadSignal(baseNoise, azimuth, signal);
-        }
-
-        // CFAR sur le signal brut — avant intégration
-        // La fenêtre large (51 bins) estime le fond, le rejet des 5 maxima
-        // évite que le signal contamine l'estimation du bruit.
-        float[] average = SlidingAverage(baseNoise, 51, 5);
-        float[] stdev   = SlidingStdDev(baseNoise, 51, 5);
-
-        float[] cfarNoise = new float[baseNoise.Length];
-        for (int i = 0; i < baseNoise.Length; i++)
-        {
-            float sigma = (stdev[i] > 1e-9f) ? stdev[i] : 2f * Mathf.Abs(average[i]);
-            if (sigma < 1e-12f) sigma = 1e-12f;
-            cfarNoise[i] = (baseNoise[i] - average[i]) / sigma; // z-score brut
-        }
-
-        // Intégration sur les scores CFAR — les fluctuations aléatoires du bruit
-        // se moyennent vers 0, le signal cohérent s'accumule
-        float[] lineData;
-        if (integrationToggle.GetComponent<Toggle>().isOn)
-        {
-            lineData = integrate(cfarNoise);
-        }
-        else
-        {
-            integrator.Clear();
-            integrationCount = 1;
-            lineData = cfarNoise;
-        }
-
-        // Compression finale : seuil à 3σ, saturation à 10σ
-        lineData = ApplyCompression(lineData, 0f, 3f, 10f);
-
-        AddWaterfallLine(lineData);
-        FindFirstObjectByType<DSPGraph>().DrawDSPGraph(lineData, pixelSize);
+        float xFrac = Mathf.Clamp01(localPoint.x / rt.rect.width + 0.5f);
+        float bearing = BearingMath.Wrap360(xFrac * 360f - 180f);
+        double time = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
+        Game.State.Tracks.MarkBearing(time, bearing, p.spec.maxTracks);
     }
 
-    // Étale un signal sur ±2 bins voisins avec une pondération gaussienne (PSF du capteur)
-    private void SpreadSignal(float[] buffer, float azimuth, float signal)
+    private void BuildControls(Transform parent)
     {
-        int centerIndex = AzimuthToIndex(azimuth);
-        float spreadSigma = GameConstants.PSF_SIGMA;
-        for (int offset = -GameConstants.PSF_SPREAD_HALF_WIDTH; offset <= GameConstants.PSF_SPREAD_HALF_WIDTH; offset++)
-        {
-            int idx = (centerIndex + offset + buffer.Length) % buffer.Length;
-            float weight = Mathf.Exp(-0.5f * (offset * offset) / (spreadSigma * spreadSigma));
-            buffer[idx] += signal * weight;
-        }
+        UITheme t = UITheme.Current;
+        RectTransform row = UIKit.Node("Row", parent);
+        UIKit.HStack(row, 6f, 0, expandWidth: true);
+
+        _powerButton = UIKit.AddButton(row, "", OnTogglePower, 130f, 32f);
+        _powerLabel = _powerButton.GetComponentInChildren<TextMeshProUGUI>();
+
+        _integrationButton = UIKit.AddButton(row, "", OnToggleIntegration, 110f, 32f);
+        _integrationLabel = _integrationButton.GetComponentInChildren<TextMeshProUGUI>();
+
+        RectTransform pixelGroup = UIKit.Node("Pixel", row);
+        UIKit.HStack(pixelGroup, 2f, 0);
+        UIKit.AddLabel(pixelGroup, "PX", t.fontSizeSmall, t.textDim);
+        UIKit.AddButton(pixelGroup, "-", () => AdjustPixelSize(-1), 28f, 28f);
+        _pixelLabel = UIKit.AddLabel(pixelGroup, "", t.fontSizeSmall, t.text, TextAlignmentOptions.Center);
+        UIKit.Size(_pixelLabel.rectTransform, preferredWidth: 28f);
+        UIKit.AddButton(pixelGroup, "+", () => AdjustPixelSize(1), 28f, 28f);
     }
 
-    // Bruit gaussien via méthode Box-Muller
-    private float GaussianNoise(float mean, float stddev)
+    private void OnTogglePower()
     {
-        float u1 = Mathf.Max(1e-6f, 1f - Random.value);
-        float u2 = 1f - Random.value;
-        float normal = Mathf.Sqrt(-2f * Mathf.Log(u1)) * Mathf.Cos(2f * Mathf.PI * u2);
-        return mean + stddev * normal;
+        if (Game.State == null) return;
+        WaterfallProcessor p = Processor;
+        bool on = p == null || !p.Enabled;
+        Game.State.SetWaterfallEnabled(on);
     }
 
-    private float[] integrate(float[] line)
+    private void OnToggleIntegration()
     {
-        float[] outline = new float[line.Length];
-        integrator.Add(line);
-        if(integrator.Count > integration){
-            integrator.RemoveAt(0);
-        }
-        for(int i = 0;i<line.Length;i++)
-        {
-            foreach(float[] integ in integrator)
-            {
-                outline[i] += integ[i];
-            }
-        }
-        for(int i = 0;i<line.Length;i++)
-        {
-            outline[i] = outline[i] / integrator.Count;
-        }
-        integrationCount = Mathf.Min(++integrationCount,integration);
-        return outline;
+        _integrationOn = !_integrationOn;
+        WaterfallProcessor p = Processor;
+        if (p != null) p.IntegrationOn = _integrationOn;
     }
 
-
-    // Ajoute une ligne au waterfall
-    private void AddWaterfallLine(float[] lineData)
+    private void AdjustPixelSize(int delta)
     {
-        // Décale toutes les lignes vers le bas
-        foreach (GameObject line in waterfallLines)
+        _pixelSize = Mathf.Clamp(_pixelSize + delta, 1, 8);
+    }
+
+    /// <summary>Called by SensorConsole when another mode is selected. No-op: the sensor keeps listening (and
+    /// drawing power) whether or not this screen is the one showing — only the power button stops it.</summary>
+    public void Hide() { }
+
+    /// <summary>Called every frame by SensorConsole, regardless of whether this mode is the one showing.</summary>
+    public void Refresh(float unscaledDeltaSeconds)
+    {
+        WaterfallProcessor p = Processor;
+        UIKit.SetText(_pixelLabel, _pixelSize.ToString());
+
+        if (p == null)
         {
-            RectTransform lineRect = line.GetComponent<RectTransform>();
-            lineRect.anchoredPosition += Vector2.down*pixelSize; // Décalage de 5 pixels vers le bas
+            UIKit.SetText(_powerLabel, Loc.Get("ui.screen.power.off"));
+            return;
         }
 
-        // Crée une nouvelle ligne en haut
-        GameObject newLine = Instantiate(waterfallLinePrefab, waterfallContainer);
-        for(int i=0; i<pointCount; i++)
-        {
-            GameObject point = Instantiate(waterfallPointPrefab, newLine.transform);
-            point.GetComponent<RectTransform>().sizeDelta = new Vector2(pixelSize, pixelSize);
-            point.GetComponent<RectTransform>().anchoredPosition = new Vector2(i*pixelSize, 0); // Espacement de 5 pixels
-        }
-        newLine.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
-        waterfallLines.Insert(0, newLine);
+        if (_image.texture != p.Texture) _image.texture = p.Texture;
+        _image.uvRect = p.UvRect;
 
-        // Met à jour la couleur des points de la ligne (noir → vert clair)
-        UpdateLineColors(newLine, lineData);
+        if (p.LatestLine != null) DrawDsp(p.LatestLine);
 
-        // Supprime la ligne la plus ancienne si nécessaire
-        if (waterfallLines.Count > lineCount)
+        UIKit.SetText(_powerLabel, Loc.Get(p.Enabled ? "ui.screen.power.on" : "ui.screen.power.off"));
+        UIKit.SetButtonActive(_powerButton, p.Enabled);
+        UIKit.SetText(_integrationLabel, _integrationOn ? "INTEG ON" : "INTEG OFF");
+        UIKit.SetButtonActive(_integrationButton, _integrationOn);
+
+        if (Game.State != null)
         {
-            GameObject oldLine = waterfallLines[waterfallLines.Count - 1];
-            waterfallLines.RemoveAt(waterfallLines.Count - 1);
-            Destroy(oldLine);
+            float headingDeg = (float)Game.State.Ship.headingDeg;
+            _overlay.Refresh(Game.State.Tracks, headingDeg, p);
+            RefreshDspTicks(Game.State.Tracks, headingDeg);
         }
     }
 
-    // Met à jour les couleurs des points d'une ligne (noir → vert clair)
-    // lineData est en sortie CFAR : ~0 pour le bruit, >1 pour les détections, jusqu'à 100
-    private void UpdateLineColors(GameObject line, float[] lineData)
+    // Thin ticks under the DSP trace at every track's CURRENT bearing (the DSP strip only ever shows the
+    // newest line, so unlike the waterfall image's pixel chain there's no history to place here — just "does
+    // this track's estimate sit on the peak that's visible right now"). A searching (not yet locked) track
+    // shows red, same as its tick on the waterfall image and its row in the Track panel — one consistent
+    // "not locked yet" signal everywhere. World-bearing-centered, same as the waterfall image: no heading
+    // offset (headingDeg is unused here now, kept only so callers don't need to change).
+    private void RefreshDspTicks(TrackManager tracks, float headingDeg)
     {
-        for (int i = 0; i < lineData.Length; i++)
+        UITheme t = UITheme.Current;
+        IList<Track> all = tracks.All;
+        int used = 0;
+
+        for (int i = 0; i < all.Count; i++)
         {
-            RawImage point = line.transform.GetChild(i).GetComponent<RawImage>();
-            float t = Mathf.Clamp01(lineData[i]);
-            point.color = new Color(0.5f * t, t, 0.5f * t);
+            Track tr = all[i];
+
+            Image tick = GetDspTick(used);
+            tick.gameObject.SetActive(true);
+
+            bool selected = tr.id == tracks.SelectedId;
+            bool searching = tr.status != TrackStatus.Confirmed;
+            Color color = selected ? t.accent : (searching ? t.danger : t.good);
+            color.a = selected ? 0.95f : (searching ? 0.85f : 0.6f);
+            tick.color = color;
+
+            float x = (BearingMath.Wrap180(tr.bearing) + 180f) / 360f;
+            RectTransform rt = tick.rectTransform;
+            rt.anchorMin = new Vector2(x, 0f);
+            rt.anchorMax = new Vector2(x, 1f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(DspTickWidth, 0f);
+            rt.anchoredPosition = Vector2.zero;
+
+            used++;
         }
+
+        for (int i = used; i < _dspTicks.Count; i++)
+            if (_dspTicks[i].gameObject.activeSelf) _dspTicks[i].gameObject.SetActive(false);
     }
 
-    // Efface le waterfall
-    public void ClearWaterfall()
+    private Image GetDspTick(int index)
     {
-        foreach (GameObject line in waterfallLines)
+        while (_dspTicks.Count <= index)
         {
-            Destroy(line);
+            Image tick = UIKit.AddPanel(_dspArea, "Tick", Color.white);
+            tick.raycastTarget = false;
+            _dspTicks.Add(tick);
         }
-        waterfallLines.Clear();
+        return _dspTicks[index];
     }
 
-    public override void OnButtonClick(int index)
+    // Downsamples the raw DSP line by _pixelSize (cosmetic point density, matching the old size slider) and
+    // normalizes it 0..1 (0.5 = zero) for LineGraphic, which expects values in that range.
+    private void DrawDsp(float[] line)
     {
-        return;
-    }
-    
+        int step = Mathf.Max(1, _pixelSize);
+        int count = Mathf.Max(1, line.Length / step);
+        if (_dspNormalized.Length < count) _dspNormalized = new float[count];
 
-private int AzimuthToIndex(float azimuth)
-{
-    // Convertit l'azimut (-180° à 180°) en index (0 à pointCount-1)
-    int index = Mathf.FloorToInt((azimuth + 180f) / (360f / pointCount)) % pointCount;
-    return Mathf.Clamp(index, 0, pointCount - 1);
-}
+        float maxAbs = 1e-6f;
+        for (int i = 0; i < count; i++) maxAbs = Mathf.Max(maxAbs, Mathf.Abs(line[i * step]));
+
+        for (int i = 0; i < count; i++)
+            _dspNormalized[i] = 0.5f + 0.5f * Mathf.Clamp(line[i * step] / maxAbs, -1f, 1f);
+
+        _dspLine.SetValues(_dspNormalized, count);
+    }
 }

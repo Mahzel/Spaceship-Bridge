@@ -13,6 +13,8 @@ public class SpectralLine
 {
     public float wavelength; // Longueur d'onde en nanomètres (nm)
     public float intensity; // Intensité de la raie spectrale
+    public string species;  // Chemical symbol this line belongs to (see SpectralLineTable) - null/empty for
+                             // old data or a line with no known species, in which case the overlay shows "?"
 }
 
 [System.Serializable]
@@ -20,6 +22,25 @@ public class Spectrum
 {
     public List<SpectralLine> emissionLines; // Raies d'émission
     public List<SpectralLine> absorptionLines; // Raies d'absorption
+}
+
+/// <summary>
+/// A body's retained gas envelope: composition (by mass/volume %, gas-giant style - not a partial crust
+/// list) plus surface pressure. See AtmosphereModel for how it's generated (Jeans escape) and how it turns
+/// into an actual surface temperature (grey-atmosphere greenhouse approximation).
+/// </summary>
+[System.Serializable]
+public class Atmosphere
+{
+    public List<ChemicalComposition> composition = new List<ChemicalComposition>();
+
+    /// <summary>Surface pressure in Earth atmospheres. 0 = airless. Meaningless for a gas giant
+    /// (isEnvelope = true) - there is no solid surface for a pressure to be "at".</summary>
+    public float surfacePressureAtm;
+
+    /// <summary>True for a gas giant's deep H/He envelope: composition here describes the bulk gas, not a
+    /// thin retained atmosphere over a surface, and surfacePressureAtm/greenhouse math don't apply.</summary>
+    public bool isEnvelope;
 }
 
 public static class Utils

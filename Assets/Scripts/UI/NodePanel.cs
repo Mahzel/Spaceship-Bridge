@@ -191,8 +191,8 @@ public sealed class NodePanel
         if (mp != null && mp.Armed)
         {
             ManeuverPlan.Node next = mp.Next.Value;
-            double dtDays = Game.Clock != null ? (next.simSeconds - Game.Clock.SimSeconds) / 86400.0 : 0.0;
-            UIKit.SetText(_queueLine, Loc.Get("ui.node.queue", dtDays, next.TotalDvKmS, mp.QueueCount));
+            double dtSeconds = Game.Clock != null ? next.simSeconds - Game.Clock.SimSeconds : 0.0;
+            UIKit.SetText(_queueLine, Loc.Get("ui.node.queue", Loc.Countdown(dtSeconds), next.TotalDvKmS, mp.QueueCount));
         }
         else
         {

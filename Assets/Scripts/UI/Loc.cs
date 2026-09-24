@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 /// <summary>
@@ -47,14 +48,13 @@ public static class Loc
         { "ui.radar.cancel",           "CANCEL" },
         { "ui.radar.pinging",          "PINGING... eta ~{0:F0}s" },
         { "ui.radar.noreturn",         "no return" },
-        { "ui.radar.result.range",     "RANGE {0:F2} AU" },
-        { "ui.radar.result.rangerate", "RANGE {0:F2} AU   RATE {1:+0.00;-0.00} km/s" },
-        { "ui.radar.result.rangerate.brg", "RANGE {0:F2} AU   RATE {1:+0.00;-0.00} km/s   @ {2:000.0}" },
+        { "ui.radar.result.range",     "RANGE {0}" },
+        { "ui.radar.result.rangerate", "RANGE {0}   RATE {1:+0.00;-0.00} km/s" },
+        { "ui.radar.result.rangerate.brg", "RANGE {0}   RATE {1:+0.00;-0.00} km/s   @ {2:000.0}" },
         { "ui.radar.result.moved",     "(track moved: not filed)" },
         { "ui.radar.result.sweep",     "SWEEP COMPLETE: {0} return(s)" },
         { "ui.radar.scale",            "SCALE" },
-        { "ui.radar.scale.value",      "{0:0} AU" },
-        { "ui.radar.rings",            "rings every {0:0.##} AU   north up" },
+        { "ui.radar.rings",            "rings every {0}   north up" },
         { "ui.radar.returns",          "returns on scope: {0}" },
         { "ui.radar.hint.sweep",       "Click the scope to aim the sweep. Click a return to mark it as a track." },
         { "ui.radar.hint.track",       "Pings the selected track's bearing for a precise range and range rate. Click a track line to select it." },
@@ -189,7 +189,7 @@ public static class Loc
         { "ui.node.clear",            "CLEAR" },
         { "ui.node.warp",             "WARP TO NODE" },
         { "ui.node.warp.cancel",      "CANCEL WARP" },
-        { "ui.node.queue",            "Node in {0:F1} d   dv {1:F2} km/s   ({2} queued)" },
+        { "ui.node.queue",            "Node in {0}   dv {1:F2} km/s   ({2} queued)" },
         { "ui.node.queue.none",       "No node armed." },
         { "ui.node.arm.hint",         "ARM queues the hand-set burn above (set PROGRADE/NORMAL first). PLOT TRANSFER and CREATE NODES (NAV tab) queue their own burns immediately - no separate ARM needed, and ARM here would replace them." },
         { "ui.node.target",           "TARGET: {0}" },
@@ -223,7 +223,7 @@ public static class Loc
         { "ui.nav.transfer.unavailable", "No fix yet - range unresolved (needs more tracking time), or no stable own orbit." },
         { "ui.nav.transfer.phase",       "PHASE {0:F0} deg / needs {1:F0} deg" },
         { "ui.nav.transfer.window.open", "WINDOW OPEN NOW" },
-        { "ui.nav.transfer.window.wait", "WINDOW IN {0:F1} d" },
+        { "ui.nav.transfer.window.wait", "WINDOW IN {0}" },
         { "ui.nav.transfer.dv",          "dv {0:F2} + {1:F2} km/s   ToF {2:F1} d" },
         { "ui.nav.transfer.create",      "CREATE + ARM NODES" },
 
@@ -487,6 +487,19 @@ public static class Loc
         if (double.IsInfinity(au) || double.IsNaN(au)) return "-";
         if (au < 0.01) return (au * 1.495978707e8).ToString("N0") + " km";
         return au.ToString(au < 10 ? "F2" : "F1") + " AU";
+    }
+
+    /// <summary>A duration in simulated seconds, as D:HH:MM:SS (the day segment dropped under 24h) - a plain
+    /// "x.x d" reads as roughly-a-day-and-a-bit right up until the burn, which is exactly the useless moment
+    /// for a countdown (waiting for the last seconds before an armed node fires). Negative/NaN clamp to 0.</summary>
+    public static string Countdown(double seconds)
+    {
+        if (double.IsNaN(seconds)) return "-";
+        long total = (long)Math.Round(Math.Max(0.0, seconds));
+        long d = total / 86400; total -= d * 86400;
+        long h = total / 3600;  total -= h * 3600;
+        long m = total / 60;    long s = total - m * 60;
+        return d > 0 ? $"{d}:{h:00}:{m:00}:{s:00}" : $"{h:00}:{m:00}:{s:00}";
     }
 
     public static string Get(string key, params object[] args)

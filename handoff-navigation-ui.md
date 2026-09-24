@@ -427,3 +427,35 @@ numbers land in a sane ballpark before trusting CREATE NODES.
 **Not compile-checked**, same as everything else in this file. The waterfall fix in particular is worth a
 specific in-Editor check: warp up while tracking something with a fast-changing bearing (a close lunar
 transfer is exactly the repro) and confirm only one track/contact appears, not a duplicate.
+
+## Progress (this session - NAV map clipping/pan, radar close-range scale, countdown formatting)
+
+- **NAV map overflow:** `UI/NavScreen.cs`'s `_mapRect` had no clipping - a catalogue orbit far bigger than
+  whatever the ship's own orbit had auto-fit the zoom to (a distant planet's orbit next to a sub-1AU ship
+  orbit, screenshotted) rendered straight through the sidebar and up over the topbar. Added a `RectMask2D` on
+  `_mapRect`. `MapCanvas` itself moved to a new child node (`Canvas`) because Unity's clip search starts at a
+  Graphic's PARENT - a mask on the graphic's own GameObject doesn't clip it; the marker labels and the
+  `OrbitPanel`/`TrackOrbitPanel` corner overlays, already direct children of `_mapRect`, needed no such move.
+  Also added drag-to-pan (`_panOffsetPx`, reset on `OnShown()`/re-fit) on the same request.
+- **Radar close-range scale:** `rangeScalesAu`'s old spread (5/20/60/200 AU) bottomed out useless at lunar
+  distance (~0.0026 AU) - the return sat dead-centre with no usable range-bin resolution, and the result
+  readout (`ui.radar.result.rangerate.brg`, hardcoded `{0:F2} AU`) rounded anything under ~0.005 AU to
+  "0.00 AU" regardless. This is very likely the actual explanation for "radar ranging didn't help refine the
+  moon distance" - the fix may well have been fine, just unreadable. `RadarSpec.rangeScalesAu`'s default now
+  spans ~1,000 km up through 200 AU (11 tiers); `RadarScreen`'s scale row changed from one button per tier
+  (would never have fit that many) to a -/+ stepper; both the tier label and the fire-result readout now go
+  through `Loc.Distance` (already existed, auto-switches km/AU at 0.01 AU) instead of a flat `F2 AU`.
+- **Countdown precision:** `ui.node.queue` ("Node in X.X d") and `ui.nav.transfer.window.wait` ("WINDOW IN
+  X.X d") both only had one decimal day of resolution - useless for actually watching a countdown to a burn
+  in its last seconds, per direct complaint. Added `Loc.Countdown(seconds)` (`D:HH:MM:SS`, day segment
+  dropped under 24h) and switched both to it.
+- **Not investigated - needs a repro, not a guess:** "the last manoeuver sent me orbiting the sun." Read
+  through `ManeuverPlan.SolveHohmann`/`SolveHohmannGeometry` looking for a sign/unit bug and didn't find an
+  obvious one; the far more likely explanation is the intended consequence of this session's own earlier
+  change (`OrbitFit`/no-NodeData rework) - the screenshotted target fit had e=0.951, a genuinely poor/early
+  TMA fit, and `SolveHohmann` treats the target as CIRCULAR at its fitted semi-major axis, which is a bad
+  approximation for a fit that eccentric. That combination could plausibly produce a burn large/wrong enough
+  to eject the ship from Earth orbit entirely - which is exactly "uncertainty has teeth," the explicit design
+  goal from a few messages earlier in this same session. Flagging rather than guess-patching orbital math with
+  no way to test it: worth deciding whether that's working as intended (get a better fix before committing to
+  CREATE NODES) or whether the planner should refuse/warn below some fit-quality threshold.

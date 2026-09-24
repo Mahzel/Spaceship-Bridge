@@ -44,8 +44,22 @@ public class RadarSpec : SensorSpec
     [Tooltip("Range bins across the selected display range. Two contacts closer in range than one bin (and in " +
              "the same cell) merge into a single return.")]
     [Min(32)] public int rangeBins = 512;
-    [Tooltip("Selectable instrumented ranges, AU. Shorter = finer range bins and a shorter listen window.")]
-    public float[] rangeScalesAu = { 5f, 20f, 60f, 200f };
+    [Tooltip("Selectable instrumented ranges, AU (a -/+ stepper on the scope, not one button per tier, so this " +
+             "can hold as many as make sense). Shorter = finer range bins and a shorter listen window. The " +
+             "bottom few are sized for ranging a moon from a close planetary orbit (roughly 1,000 km to a few " +
+             "hundred thousand km) - the old AU-only spread bottomed out at 5 AU, useless at lunar distance " +
+             "(~0.0026 AU): the return sat dead-center on the scope with no usable spatial or range-bin " +
+             "resolution.")]
+    public float[] rangeScalesAu =
+    {
+        0.0000067f,  // ~1,000 km
+        0.000067f,   // ~10,000 km
+        0.00067f,    // ~100,000 km
+        0.0033f,     // ~500,000 km
+        0.0067f,     // ~1,000,000 km
+        0.05f,       // ~7,500,000 km
+        1f, 5f, 20f, 60f, 200f,
+    };
     [Tooltip("CFAR threshold, in noise sigmas (the noise estimate comes from a short window, so its tails are " +
              "fatter than a pure Gaussian). At 5.0 a 60-degree sweep gives about one false return every three " +
              "pings; 4.2 gives about three per ping.")]

@@ -34,13 +34,15 @@ public sealed class RadarScreen
     private const float FallbackBeamMin = 5f, FallbackBeamMax = 90f;
     private const float ElStepDeg = 2f;
     private const float AzKeyDegPerSec = 45f, ElKeyDegPerSec = 15f;
-    private static readonly float[] FallbackScales = { 5f, 20f, 60f, 200f };
+    // Mirrors RadarSpec's own default (see its doc comment) so a null spec still offers close-range tiers.
+    private static readonly float[] FallbackScales =
+        { 0.0000067f, 0.000067f, 0.00067f, 0.0033f, 0.0067f, 0.05f, 1f, 5f, 20f, 60f, 200f };
 
     private RadarPingMode _uiMode = RadarPingMode.Sweep;
     private float _aimBearingDeg;
     private float _beamHalfWidthDeg = 30f;
     private float _aimElevationDeg;
-    private int _scaleIndex = 1;
+    private int _scaleIndex = 8; // defaults to the ~20 AU tier - a reasonable system-scale sweep to start on
 
     private GameObject _root;
     private RawImage _scope;
@@ -54,7 +56,7 @@ public sealed class RadarScreen
 
     private Button _sweepModeButton, _trackModeButton, _fireButton, _cancelButton;
     private TextMeshProUGUI _fireLabel;
-    private Button[] _scaleButtons;
+    private TextMeshProUGUI _scaleLabel;
     private TextMeshProUGUI _widthLabel, _targetLabel, _statusLabel, _ringsLabel, _hintLabel, _returnsLabel, _elLabel;
     private RectTransform _widthRow, _targetRow;
 
@@ -154,6 +156,11 @@ public sealed class RadarScreen
         _trackModeButton = UIKit.AddButton(row, Loc.Get("ui.radar.mode.track"), () => _uiMode = RadarPingMode.Track, 0f, 34f);
     }
 
+    // A -/+ stepper, not one button per tier: rangeScalesAu now spans from a few thousand km (useful ranging
+    // a moon from a close planetary orbit) up to 200 AU, and that many discrete tiers would never fit as a
+    // row of buttons in the controls column. Loc.Distance formats whichever tier is selected in whatever
+    // unit reads best (km below 0.01 AU, AU above) - see the user-reported bug this addresses: the old
+    // AU-only scale bottomed out at 5 AU, useless for ranging a body a few hundred thousand km away.
     private void BuildScaleRow(Transform parent)
     {
         UITheme t = UITheme.Current;
@@ -162,16 +169,13 @@ public sealed class RadarScreen
         h.childAlignment = TextAnchor.MiddleLeft;
         UIKit.AddLabel(row, Loc.Get("ui.radar.scale"), t.fontSizeSmall, t.textDim);
         _scales = Scales;
-        float[] scales = _scales;
-        _scaleButtons = new Button[scales.Length];
-        for (int i = 0; i < scales.Length; i++)
-        {
-            int idx = i;
-            _scaleButtons[i] = UIKit.AddButton(row, Loc.Get("ui.radar.scale.value", scales[i]), () => _scaleIndex = idx, 64f, 30f);
-            TextMeshProUGUI lbl = _scaleButtons[i].GetComponentInChildren<TextMeshProUGUI>();
-            if (lbl != null) lbl.fontSize = t.fontSizeSmall;
-        }
+        UIKit.AddButton(row, "-", () => AdjustScale(-1), 28f, 28f);
+        _scaleLabel = UIKit.AddLabel(row, "", t.fontSizeSmall, t.text, TextAlignmentOptions.Center);
+        UIKit.Size(_scaleLabel.rectTransform, preferredWidth: 130f); // fits "1 000 000 km", the longest tier
+        UIKit.AddButton(row, "+", () => AdjustScale(1), 28f, 28f);
     }
+
+    private void AdjustScale(int delta) => _scaleIndex = Mathf.Clamp(_scaleIndex + delta, 0, _scales.Length - 1);
 
     private void BuildWidthRow(Transform parent)
     {
@@ -350,7 +354,7 @@ public sealed class RadarScreen
 
         UIKit.SetButtonActive(_sweepModeButton, sweep);
         UIKit.SetButtonActive(_trackModeButton, !sweep);
-        for (int i = 0; i < _scaleButtons.Length; i++) UIKit.SetButtonActive(_scaleButtons[i], i == _scaleIndex);
+        UIKit.SetText(_scaleLabel, Loc.Distance(ScaleAu));
 
         if (_widthRow.gameObject.activeSelf != sweep) _widthRow.gameObject.SetActive(sweep);
         if (_targetRow.gameObject.activeSelf != !sweep) _targetRow.gameObject.SetActive(!sweep);
@@ -376,7 +380,7 @@ public sealed class RadarScreen
         UIKit.SetText(_fireLabel, Loc.Get(pinging ? "ui.radar.reping" : "ui.radar.fire"));
         _cancelButton.interactable = pinging;
 
-        UIKit.SetText(_ringsLabel, Loc.Get("ui.radar.rings", ScaleAu * 0.25f));
+        UIKit.SetText(_ringsLabel, Loc.Get("ui.radar.rings", Loc.Distance(ScaleAu * 0.25f)));
         UIKit.SetText(_returnsLabel, Loc.Get("ui.radar.returns", p != null ? p.Returns.Count : 0));
         if (_flashHold > 0f) { _flashHold -= unscaledDeltaSeconds; UIKit.SetText(_hintLabel, _flash); }
         else UIKit.SetText(_hintLabel, Loc.Get(sweep ? "ui.radar.hint.sweep" : "ui.radar.hint.track"));
@@ -413,7 +417,7 @@ public sealed class RadarScreen
         if (r == null) { UIKit.SetText(_statusLabel, ""); return; }
         if (r.mode == RadarPingMode.Sweep) { UIKit.SetText(_statusLabel, Loc.Get("ui.radar.result.sweep", r.returnCount)); return; }
         if (!r.hit) { UIKit.SetText(_statusLabel, Loc.Get("ui.radar.noreturn")); return; }
-        string text = Loc.Get("ui.radar.result.rangerate.brg", r.rangeAu, r.radialVelocityKmS, r.bearingDeg);
+        string text = Loc.Get("ui.radar.result.rangerate.brg", Loc.Distance(r.rangeAu), r.radialVelocityKmS, r.bearingDeg);
         if (r.trackMoved) text += "  " + Loc.Get("ui.radar.result.moved");
         UIKit.SetText(_statusLabel, text);
     }

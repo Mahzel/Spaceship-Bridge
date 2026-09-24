@@ -71,6 +71,7 @@ public sealed class NavScreen
     private Button _transferButton;
 
     private float _pixelsPerAu = 40f;
+    private Vector2 _panOffsetPx; // drag-to-pan, screen pixels from the map's own centre; reset on re-fit
     private bool _fitted; // whether AutoFit ran for the orbit currently on screen
     private float _redrawAccum = RedrawInterval;
 
@@ -116,10 +117,25 @@ public sealed class NavScreen
     {
         _mapRect = UIKit.Node("Map", parent);
         UIKit.Size(_mapRect, flexibleWidth: 1f, minHeight: 600f, flexibleHeight: 1f);
-        _map = _mapRect.gameObject.AddComponent<MapCanvas>();
+        // RectMask2D on THIS node clips everything drawn/positioned inside it (MapCanvas, marker labels, the
+        // corner overlays) to the map's own bounds - a catalogue orbit far bigger than whatever the current
+        // zoom was fit to (Saturn's, say, next to a sub-1AU ship orbit) used to render straight through the
+        // sidebar and up over the topbar instead of just running off the edge like a real scope would.
+        _mapRect.gameObject.AddComponent<RectMask2D>();
+
+        // MapCanvas itself goes on a CHILD node, not this one: Unity's clip search starts at a Graphic's
+        // PARENT, so a RectMask2D would not clip a Graphic sitting on its own same GameObject. The marker
+        // labels/corner overlays built as actual children of _mapRect (below) don't need this - a mask on
+        // their direct parent already clips them correctly.
+        RectTransform canvasRect = UIKit.Node("Canvas", _mapRect);
+        UIKit.Stretch(canvasRect);
+        _map = canvasRect.gameObject.AddComponent<MapCanvas>();
         _map.raycastTarget = true; // clickable: selecting a track here mirrors ContactsScreen's row click
-        var aim = _mapRect.gameObject.AddComponent<PointerAim>();
+        var aim = canvasRect.gameObject.AddComponent<PointerAim>();
         aim.OnClick = OnMapClicked;
+        // Drag to pan: the view can now run off zoomed-in content (or a huge catalogue orbit past the clip
+        // edge) without losing track of it entirely.
+        aim.OnDragged = (delta, local, rt) => _panOffsetPx += delta;
 
         _orbit.Build(_mapRect);
         _targetOrbit.Build(_mapRect);
@@ -231,6 +247,7 @@ public sealed class NavScreen
     public void OnShown()
     {
         _fitted = false;
+        _panOffsetPx = Vector2.zero;
         _redrawAccum = RedrawInterval;
         if (_mapRect != null) LayoutRebuilder.ForceRebuildLayoutImmediate(_mapRect);
     }
@@ -318,7 +335,7 @@ public sealed class NavScreen
         if (!_fitted) { AutoFit(orbit); _fitted = true; }
 
         float gu = GameConstants.GAME_UNITS_PER_UA;
-        Vector2 center = _mapRect.rect.center;
+        Vector2 center = _mapRect.rect.center + _panOffsetPx;
         Func<Vector3, Vector2> toScreen = off => center + new Vector2(off.x, off.z) / gu * _pixelsPerAu;
 
         // Primary at the focus.
@@ -606,7 +623,7 @@ public sealed class NavScreen
         UIKit.SetText(_transferPhase, Loc.Get("ui.nav.transfer.phase", w.phaseNowDeg, w.phaseIdealDeg));
         UIKit.SetText(_transferWindow, w.waitSeconds < 3600.0
             ? Loc.Get("ui.nav.transfer.window.open")
-            : Loc.Get("ui.nav.transfer.window.wait", w.waitSeconds / 86400.0));
+            : Loc.Get("ui.nav.transfer.window.wait", Loc.Countdown(w.waitSeconds)));
         UIKit.SetText(_transferDv, Loc.Get("ui.nav.transfer.dv", w.departureDvKmS, w.arrivalDvKmS, w.transferTimeSeconds / 86400.0));
         _transferButton.interactable = true;
     }

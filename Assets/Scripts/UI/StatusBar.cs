@@ -41,7 +41,7 @@ public sealed class StatusBar
         RectTransform info = UIKit.Node("Info", rt);
         var col = UIKit.VStack(info, 0f, 0, expandWidth: true);
         col.childAlignment = TextAnchor.MiddleLeft;
-        UIKit.Size(info, preferredWidth: 260f);
+        UIKit.Size(info, preferredWidth: 300f); // was 260 - MET's D:HH:MM:SS reads longer than "DAY X.X" did
         _runLine    = UIKit.AddLabel(info, "", t.fontSizeBody,  t.text);
         _systemLine = UIKit.AddLabel(info, "", t.fontSizeSmall, t.textDim);
 
@@ -116,7 +116,7 @@ public sealed class StatusBar
         UITheme t = UITheme.Current;
 
         string system = SystemManager.Current != null ? SystemManager.Current.CurrentSystemID : "-";
-        UIKit.SetText(_runLine,    Loc.Get("ui.run", run.RunNumber, run.RunElapsedDays));
+        UIKit.SetText(_runLine,    Loc.Get("ui.run", run.RunNumber, Loc.Countdown(run.RunElapsedSeconds)));
         UIKit.SetText(_systemLine, Loc.Get("ui.system.trust", system, state.Trust));
 
         float p = state.PowerCapacity > 0f ? state.PowerStored / state.PowerCapacity : 0f;

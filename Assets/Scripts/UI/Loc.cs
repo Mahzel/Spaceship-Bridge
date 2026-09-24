@@ -115,7 +115,7 @@ public static class Loc
         { "ui.system.lock",        "LOCK" },
         { "ui.system.search",      "SEARCH" },
         { "ui.system.brg",         "{0:000.0} deg" },
-        { "ui.system.range",       "{0:F2} +/-{1:F2} AU" },
+        { "ui.system.range",       "{0} +/-{1:F0}%" },
         { "ui.system.norange",     "--" },
         { "ui.system.unknown",     "unknown" },
         { "ui.system.analyzing",   "analyzing" },
@@ -141,7 +141,7 @@ public static class Loc
         { "ui.power",    "POWER" },
         { "ui.hydrogen", "HYDROGEN" },
         { "ui.storage",  "STORAGE" },
-        { "ui.run",      "RUN {0}   -   DAY {1:F1}" },
+        { "ui.run",      "RUN {0} - MET {1}" },
         { "ui.system",   "SYSTEM {0}" },
         { "ui.net",      "{0:+0.00;-0.00} /day\nsolar +{1:F2}  reactor +{3:F2}  load -{2:F2}" },
         { "ui.pause",    "II" },
@@ -162,7 +162,7 @@ public static class Loc
         { "ui.track.markhint",     "click waterfall: mark, or move selected" },
         { "ui.heading.tick",       "HDG" },
 
-        { "ui.track.range",    "R {0:F1} AU +/-{1:F0}%" },
+        { "ui.track.range",    "R {0} +/-{1:F0}%" },
         { "ui.track.norange",  "R --" },
 
         // Orbit

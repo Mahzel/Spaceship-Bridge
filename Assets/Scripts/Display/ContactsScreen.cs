@@ -203,8 +203,8 @@ public sealed class ContactsScreen
         bool usable = re.valid && (re.Observable || tr.radarFix.valid);
         if (!usable) return Loc.Get("ui.system.norange");
         double au = re.range / GameConstants.GAME_UNITS_PER_UA;
-        double sig = re.rangeSigma / GameConstants.GAME_UNITS_PER_UA;
-        return Loc.Get("ui.system.range", au, sig);
+        double pct = re.range > 0.0 ? 100.0 * re.rangeSigma / re.range : 0.0;
+        return Loc.Get("ui.system.range", Loc.Distance(au), pct);
     }
 
     private string ShortDetail(TrackInfo info)

@@ -53,6 +53,7 @@ public sealed class RunController
     public float LoadPerDay   { get; private set; }
 
     public double RunElapsedDays => (_clock.SimSeconds - RunStartSimSeconds) / SecondsPerDay;
+    public double RunElapsedSeconds => _clock.SimSeconds - RunStartSimSeconds;
 
     /// <summary>Raised when a probe must be placed in the home system (start of every run).</summary>
     public event Action LaunchRequested;

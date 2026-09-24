@@ -211,7 +211,7 @@ public sealed class TrackPanel
             {
                 float au = (float)(re.range / GameConstants.GAME_UNITS_PER_UA);
                 float pct = (float)(100.0 * re.rangeSigma / re.range);
-                UIKit.SetText(r.range, Loc.Get("ui.track.range", au, pct));
+                UIKit.SetText(r.range, Loc.Get("ui.track.range", Loc.Distance(au), pct));
             }
             else UIKit.SetText(r.range, Loc.Get("ui.track.norange"));
         }

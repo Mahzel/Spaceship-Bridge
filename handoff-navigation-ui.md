@@ -704,3 +704,36 @@ verify it than guess at it now with no way to test.
 session's other changes (one new backwards-formula property, one new UI label, no geometry/physics touched),
 but still worth a look: does the margin actually go red and stay legible against `t.panelColor` in both themes
 when a plan is over budget.
+
+## Progress (this session - item 7, galaxy map)
+
+User unblocked the open design question directly: "Galaxy map is Sol centered in terms of coordinates" and
+"radius and everything in game units should be based on some real units, so that conversion should be doable."
+Investigating turned up something worth flagging - **the coordinate model and the jump backend already fully
+exist**, not just planned: `Data/Galaxy.cs` (`GalaxySystem{id,x,z}` in light-years, home at the origin,
+positions a deterministic hash of world seed + cell - genuinely Sol-centred already, matching the user's
+answer exactly) and `Core/JumpDrive.cs` (ship's own galaxy position, `Nearby()`, `Plan()`, `Execute()`, all
+already proven correct by the working `JumpPanel` list). The roadmap doc's "depends on the answer to whether
+galaxy coordinates exist" turned out to already be answered in code, just never turned into a visual map -
+so this pass was lower-risk than expected: reuse proven maths, add only the drawing.
+
+- **`UI/JumpPanel.cs`** reworked from a plain list into Map (left) + the SAME list (right, unchanged logic -
+  see below) - same HStack/decoupled-sidebar pattern as `NavScreen`. The map itself: `RectMask2D` + child
+  `MapCanvas` node (the same clip/child split `NavScreen`'s map needed - a mask doesn't clip a Graphic on its
+  own GameObject), drag-to-pan, +/- zoom buttons, `AutoFit` sizing the jump-range ring to roughly fill the view
+  on first show. Draws the ship's own position (centre dot + a ring at `Probe.jumpScanLy`), home specially
+  marked, and every system `Nearby()` already returns - all using data the list already trusted, nothing new
+  computed. Deliberately READ-ONLY this pass: clicking a dot doesn't select/jump, only the list's own GO
+  button does - kept the map itself low-risk by not inventing a new selection state on top of it.
+- List: **functionally unchanged**, just re-laid-out into a narrower column (was a standalone 650px-wide
+  panel, now ~440px next to the map) - same columns, same stranding-warning logic, same `Fill()`/`Go()`.
+- **Deferred, not attempted this pass**: Atlas visited/catalogued/disputed markers per system (would need
+  cross-referencing every nearby id against `Atlas.Entries` - the list doesn't do this either, so the map
+  isn't behind it), route preview, and the sector/galaxy zoom hierarchy the roadmap describes for a much
+  farther-out view than `jumpScanLy` ever shows.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Worth an in-Editor look at: whether the
+first-ever view of the JUMP tab autofits correctly (no `OnShown()`-style forced-rebuild hook here like
+`NavScreen` has, so it's guarded on the map rect having a real size instead - noted in the code); and whether
+the compressed list columns still read cleanly at ~440px, especially longer generated system IDs in the NAME
+column.

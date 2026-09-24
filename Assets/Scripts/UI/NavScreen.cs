@@ -401,6 +401,10 @@ public sealed class NavScreen
         // Track layer (roadmap item 2): under the live ship marker, over the catalogue/orbit lines.
         DrawTrackLayer(orbit, shipScreen, toScreen);
 
+        // Selected track's fitted orbit (roadmap item 6): over everything else so it reads as "this is what
+        // we're looking at", under the live ship marker so that stays on top.
+        DrawTargetOrbitLayer(toScreen);
+
         if (shipScreen.HasValue) _map.AddDot(shipScreen.Value, 5f, t.accent);
 
         _map.Rebuild();
@@ -443,6 +447,49 @@ public sealed class NavScreen
             shown++;
         }
         for (int i = shown; i < _catalogueLabels.Count; i++) _catalogueLabels[i].gameObject.SetActive(false);
+    }
+
+    /// <summary>Roadmap item 6's "dashed, widening with sigma" ellipse: the SELECTED track's fitted orbit
+    /// (OrbitFit.TryFit - never NodeData/the catalogue, same rule as the transfer planner), drawn as a dashed
+    /// ellipse in the track's own colour, with two fainter dashed ellipses bracketing it - the same orbit
+    /// shape scaled by (1 +/- the track's own range sigma fraction) about the primary. A genuinely rough
+    /// physical stand-in for positional uncertainty (not a real covariance propagation), but it does what the
+    /// roadmap asked: the band visibly shrinks as the range estimate tightens, and vanishes once it's tight
+    /// enough to not matter. No orbit at all if the track isn't selected or the fit fails (unranged, no
+    /// primary in common, or a degenerate state vector) - same conditions TrackOrbitPanel already shows
+    /// "No stable orbit" for, so the two never disagree.</summary>
+    private void DrawTargetOrbitLayer(Func<Vector3, Vector2> toScreen)
+    {
+        if (Game.State == null) return;
+        Track tr = Game.State.Tracks.Find(Game.State.Tracks.SelectedId);
+        if (tr == null || !OrbitFit.TryFit(tr, out OrbitElements el)) return;
+
+        UITheme t = UITheme.Current;
+        Color color = t.WaterfallTrackColor(true, tr.status != TrackStatus.Confirmed);
+
+        DrawFittedEllipse(el, toScreen, 2f, color);
+
+        float sigmaFraction = tr.range.Observable && tr.range.range > 0.0
+            ? Mathf.Clamp01((float)(tr.range.rangeSigma / tr.range.range)) : 0f;
+        if (sigmaFraction > 0.01f)
+        {
+            Color band = color; band.a *= 0.35f;
+            OrbitElements wide = el; wide.semiMajorAxis *= 1f + sigmaFraction;
+            OrbitElements narrow = el; narrow.semiMajorAxis *= Mathf.Max(0.05f, 1f - sigmaFraction);
+            DrawFittedEllipse(wide, toScreen, 1f, band);
+            DrawFittedEllipse(narrow, toScreen, 1f, band);
+        }
+    }
+
+    private void DrawFittedEllipse(in OrbitElements el, Func<Vector3, Vector2> toScreen, float width, Color color)
+    {
+        var pts = new List<Vector2>(CatalogueEllipsePoints + 1);
+        for (int k = 0; k <= CatalogueEllipsePoints; k++)
+        {
+            double nu = k / (double)CatalogueEllipsePoints * Math.PI * 2.0;
+            pts.Add(toScreen(KeplerOrbit.OffsetAtTrueAnomaly(el, nu)));
+        }
+        _map.AddDashedPolyline(pts, width, color, 5f, 4f, true);
     }
 
     /// <summary>Every known track: a bearing-only contact draws as a dashed ray from the ship, a ranged one as a

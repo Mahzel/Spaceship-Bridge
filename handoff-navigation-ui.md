@@ -605,3 +605,36 @@ a dev-only tool) reads it straight from `Game.State.Ship`.
 exact reported scenario: lock a nearby body (Moon-from-Earth-orbit is the given repro), warp forward hard, and
 confirm the NAV marker/TARGET ORBIT stay consistent with the waterfall's own bearing line throughout, not just
 immediately after a hit.
+
+## Progress (this session - roadmap item 6's uncertainty ellipse, drawn on the map)
+
+Filled the gap flagged at the end of the earlier track-derived-orbit-fit pass: "Target orbit fit has no
+uncertainty visualization yet... the NAV map doesn't draw the fitted ellipse at all yet, only the sidebar's
+numbers." User picked this to work on next (while away from a testing environment) out of a short list.
+
+- **`UI/NavScreen.cs`**: new `DrawTargetOrbitLayer` (called from `Draw()`, right after the track layer, under
+  the live ship dot) draws the SELECTED track's fitted orbit (`OrbitFit.TryFit` - never NodeData, same rule as
+  everywhere else) as a dashed ellipse in the track's own colour (`UITheme.WaterfallTrackColor`, same colour
+  its dot/label already use). When the track's range has an actual sigma, two fainter dashed ellipses bracket
+  it: the same shape with `semiMajorAxis` scaled by `(1 +/- sigmaFraction)` about the primary - a rough
+  physical stand-in for positional uncertainty, not a real covariance propagation, but it satisfies what the
+  roadmap actually asked for: the band visibly narrows as the range estimate tightens (more tracking time,
+  a radar ping) and disappears once it's tight enough not to matter. New `DrawFittedEllipse` helper factors
+  out the sample-and-polyline loop shared with the wide/narrow band, same pattern `DrawCatalogueLayer` already
+  used for catalogued orbits.
+- No orbit drawn at all under the exact same conditions `TrackOrbitPanel` already shows "No stable orbit" for
+  (nothing selected, unranged, no primary in common, a degenerate fit) - the two can't disagree, since both
+  gate on the same `OrbitFit.TryFit` call.
+
+**Not done this pass, explicitly deferred rather than rushed:** the OTHER half of what item 6/item 3 together
+describe - the SHIP's own predicted post-burn path drawn on the map (so CREATE NODES / a queued node previews
+its resulting orbit visually, not just as the sidebar's PERI/APO/e/i numbers `ManeuverPlan.PreviewNode`
+already computes). `PreviewNode` currently returns only summary numbers (periapsis/apoapsis/eccentricity/
+inclination/period), not a full `OrbitElements` (no argument-of-periapsis/longitude-of-ascending-node/mean-
+anomaly - the orientation a redrawn ellipse actually needs), so drawing it means extending `PreviewNode` the
+same way `OrbitFit.TryFit` gained its primary-name overload: add elements out, keep the existing callers
+(`NodePanel.Refresh`) on the summary-only version. Natural next step if there's appetite for more NAV map work.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Worth an in-Editor look at whether the
++/-sigma band ellipses are visually distinguishable from the central fit at typical zoom (too close together
+to read as a band vs. just a thicker line) and whether `band.a *= 0.35f` reads as intended in both themes.

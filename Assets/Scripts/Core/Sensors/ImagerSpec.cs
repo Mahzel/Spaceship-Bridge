@@ -15,6 +15,9 @@ public class ImagerSpec : SensorSpec
     [Header("Processing")]
     [Tooltip("Frames averaged by the integrator. 20 matches the pre-spec behaviour.")]
     [Min(1)] public int integratorDepth = 20;
+    [Tooltip("Per-block detector noise (uniform 0..this, in scene luminosity units). The picture is never " +
+             "stretched past ~20x this, so it sets the faintest thing the imager can show and FIX.")]
+    [Min(1e-5f)] public float blockNoise = 0.005f;
     [Tooltip("Ratio between brightest and faintest usable signal, in dB.")]
     [Min(1f)] public float dynamicRangeDb = 60f;
     [Tooltip("Real seconds per scan row.")]

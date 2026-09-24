@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>One packet burst sent home. Frozen snapshot of the record at send time.</summary>
+[System.Serializable]
 public sealed class Transmission
 {
     public int id;
@@ -18,6 +19,7 @@ public sealed class Transmission
     public float energy;
     public double sentTime;
     public bool lastGasp;
+    public Confidence confidence;   // declared when sent
 }
 
 public struct LinkQuote
@@ -41,6 +43,7 @@ public sealed class TransmitResult
 }
 
 /// <summary>One line of the engineering log, kept across runs: what the link actually did.</summary>
+[System.Serializable]
 public sealed class LinkLogEntry
 {
     public int run;
@@ -83,6 +86,19 @@ public sealed class Transmitter
 
     public Transmitter(GameState state) { _state = state; }
 
+    public int NextIdForSave => _nextId;
+    public bool LoggedForSave => _logged;
+
+    /// <summary>Save/load: the transmissions of the current run and the engineering log.</summary>
+    public void Restore(IList<Transmission> sent, IList<LinkLogEntry> log, int nextId, bool logged)
+    {
+        _sent.Clear(); _sent.AddRange(sent);
+        _log.Clear(); _log.AddRange(log);
+        _nextId = nextId;
+        _logged = logged;
+        if (Changed != null) Changed();
+    }
+
     public void NewRun()
     {
         _sent.Clear();
@@ -111,6 +127,13 @@ public sealed class Transmitter
     public static float SuccessAt(float marginDb)
     {
         return (float)(1.0 / (1.0 + Math.Exp(-(marginDb - KneeDb) / SoftnessDb)));
+    }
+
+    /// <summary>Confidence declared with the LAST transmission of this record (what home received it as).</summary>
+    public Confidence ConfidenceSent(int recordId, Confidence fallback)
+    {
+        for (int i = _sent.Count - 1; i >= 0; i--) if (_sent[i].recordId == recordId) return _sent[i].confidence;
+        return fallback;
     }
 
     public int SentCount(int recordId)
@@ -153,6 +176,7 @@ public sealed class Transmitter
         t.energy = energy;
         t.sentTime = Now();
         t.lastGasp = gasp;
+        t.confidence = r.confidence;
         _sent.Add(t);
         if (Changed != null) Changed();
     }

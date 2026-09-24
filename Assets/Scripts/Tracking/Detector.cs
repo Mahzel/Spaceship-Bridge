@@ -8,6 +8,12 @@ public struct Detection
     public float  bearing;  // world bearing, degrees [0, 360)
     public float  snr;      // detection score (sigmas, after integration gain)
     public float  sigmaDeg; // 1-sigma bearing accuracy, degrees
+
+    /// <summary>Elevation the receiving beam was pointed at, and how coarse that is (1-sigma, degrees). A fan
+    /// beam doesn't measure elevation inside its fan, so this is only "somewhere around here". 0 sigma = no
+    /// elevation information at all.</summary>
+    public float  elevationDeg;
+    public float  elevationSigmaDeg;
 }
 
 public static class BearingMath

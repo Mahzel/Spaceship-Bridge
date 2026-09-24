@@ -1,9 +1,11 @@
 using System;
 
-public enum RunPhase { Idle, Flight, Debrief }
+/// <summary>Refit: choosing the next probe's loadout, before a launch (appended last: saves store the int).</summary>
+public enum RunPhase { Idle, Flight, Debrief, Refit }
 public enum RunEndCause { None, PowerDepleted, ReturnedHome }
 
 /// <summary>What the debrief screen shows about a finished run.</summary>
+[System.Serializable]
 public sealed class RunSummary
 {
     public int          runNumber;
@@ -17,6 +19,11 @@ public sealed class RunSummary
     public float        txValueSent, txValueReceived;
     public float        returnedValue;     // value carried home by a returning probe
     public float        totalValue;        // returned + received
+
+    // Review at home (see Review.Process)
+    public float trustBefore, trustAfter;
+    public int   entriesFiled, entriesReviewed, entriesDisputed, entriesCorrected;
+    public System.Collections.Generic.List<TrustChange> trustChanges = new System.Collections.Generic.List<TrustChange>();
 }
 
 /// <summary>
@@ -50,6 +57,8 @@ public sealed class RunController
     /// <summary>Raised when a probe must be placed in the home system (start of every run).</summary>
     public event Action LaunchRequested;
     public event Action<RunSummary> RunEnded;
+    /// <summary>Raised at the very end of BeginRun, once the new probe sits in the home system.</summary>
+    public event Action Launched;
     public event Action Changed;
 
     public RunController(GameClock clock, GameState state)
@@ -65,10 +74,56 @@ public sealed class RunController
         _state.ResetProbe();
         RunStartSimSeconds = _clock.SimSeconds;
         Phase = RunPhase.Flight;
-        _clock.SetPaused(false);
-        _clock.SetWarp(1f); // a new probe starts at normal speed
+        // Launch pacing comes from Settings > Time (default warp, start paused).
+        _clock.SetWarpLadder(Settings.Data.defaultWarp);
+        _clock.SetPaused(Settings.Data.startPaused);
 
         LaunchRequested?.Invoke();
+        Changed?.Invoke();
+        Launched?.Invoke(); // the probe is in place: a good moment to autosave
+    }
+
+    /// <summary>Opens the refit (probe loadout) before the next launch: after a debrief, or at New Game.</summary>
+    public void BeginRefit()
+    {
+        Phase = RunPhase.Refit;
+        _clock.SetPaused(true);
+        Changed?.Invoke();
+    }
+
+    /// <summary>Refit > BACK: returns to the debrief it came from (if there is one).</summary>
+    public void BackToDebrief()
+    {
+        if (Phase != RunPhase.Refit || LastSummary == null) return;
+        Phase = RunPhase.Debrief;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Save/load: the run's phase and history. Does not touch the probe (see Game.ApplySave).</summary>
+    public void Restore(RunPhase phase, int runNumber, double runStartSimSeconds, RunSummary lastSummary)
+    {
+        Phase = phase;
+        RunNumber = runNumber;
+        RunStartSimSeconds = runStartSimSeconds;
+        LastSummary = lastSummary;
+        Changed?.Invoke();
+    }
+
+    /// <summary>New Game: back to "no run yet" (the next BeginRun is run #1).</summary>
+    public void ResetForNewGame()
+    {
+        RunNumber = 0;
+        LastSummary = null;
+        Phase = RunPhase.Idle;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Abandons the current run without a debrief (pause menu > Main Menu). Nothing is filed to the
+    /// atlas and nothing is transmitted: the expedition is simply left, and the main menu shows.</summary>
+    public void Abandon()
+    {
+        Phase = RunPhase.Idle;
+        _clock.SetPaused(true);
         Changed?.Invoke();
     }
 
@@ -97,9 +152,17 @@ public sealed class RunController
         if (_state.IsProbeDead) EndRun(RunEndCause.PowerDepleted);
     }
 
+    private readonly System.Collections.Generic.List<AtlasEntry> _filed = new System.Collections.Generic.List<AtlasEntry>();
+
+    private void Filed(AtlasEntry e)
+    {
+        if (e != null && !e.catalogued && !_filed.Contains(e)) _filed.Add(e);
+    }
+
     public void EndRun(RunEndCause cause)
     {
         if (Phase != RunPhase.Flight) return;
+        _filed.Clear();
 
         Phase = RunPhase.Debrief;
 
@@ -120,14 +183,15 @@ public sealed class RunController
         if (home)
         {
             foreach (DataRecord r in _state.Data.Records)
-                _state.Atlas.Log(r, _state.WorldSeed, RunNumber, _clock.SimSeconds);
+                Filed(_state.Atlas.Log(r, _state.WorldSeed, RunNumber, _clock.SimSeconds, r.confidence));
         }
         else
         {
             for (int i = 0; i < tx.recordsReceived.Count; i++)
             {
                 DataRecord r = _state.Data.Find(tx.recordsReceived[i]);
-                if (r != null) _state.Atlas.Log(r, _state.WorldSeed, RunNumber, _clock.SimSeconds);
+                if (r != null) Filed(_state.Atlas.Log(r, _state.WorldSeed, RunNumber, _clock.SimSeconds,
+                                                      _state.Link.ConfidenceSent(r.id, r.confidence)));
             }
         }
 
@@ -145,6 +209,9 @@ public sealed class RunController
             returnedValue = returned,
             totalValue = returned + tx.valueReceived
         };
+
+        // Home reviews the atlas: rewards what arrived, catches some false entries, credits corrections.
+        Review.Process(_state, RunNumber, cause, _filed, LastSummary);
 
         _clock.SetPaused(true); // the world holds still during the debrief
         RunEnded?.Invoke(LastSummary);

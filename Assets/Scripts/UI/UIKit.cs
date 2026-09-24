@@ -184,9 +184,12 @@ public static class UIKit
     }
 }
 
-/// <summary>A horizontal fill bar with a title on the left and a value on the right.</summary>
+/// <summary>A labelled gauge: title (left) and value (right) on a text row, with a slim fill track under it.
+/// The text never sits on the fill, so it stays readable whatever the fill colour or theme.</summary>
 public sealed class UIBar
 {
+    private const float TrackHeight = 8f;
+
     private RectTransform _fill;
     private Image _fillImage;
     private TextMeshProUGUI _value;
@@ -196,22 +199,33 @@ public sealed class UIBar
         UITheme t = UITheme.Current;
         var bar = new UIBar();
 
-        Image back = UIKit.AddPanel(parent, "Bar", t.barBack);
-        UIKit.Size(back.rectTransform, preferredWidth: width, minHeight: height);
+        RectTransform root = UIKit.Node("Bar", parent);
+        UIKit.Size(root, preferredWidth: width, minHeight: height);
+        var v = UIKit.VStack(root, 3f, 0);
+        v.childAlignment = TextAnchor.MiddleCenter;
+        v.padding = new RectOffset(4, 4, 2, 2);
 
+        // Text row
+        RectTransform row = UIKit.Node("Text", root);
+        var le = row.gameObject.AddComponent<LayoutElement>();
+        le.flexibleHeight = 1f;
+        le.minHeight = t.fontSizeSmall + 4f;
+        var titleLabel = UIKit.AddLabel(row, title, t.fontSizeSmall, t.textDim, TextAlignmentOptions.MidlineLeft);
+        UIKit.Stretch(titleLabel.rectTransform);
+        bar._value = UIKit.AddLabel(row, "", t.fontSizeSmall, t.text, TextAlignmentOptions.MidlineRight);
+        UIKit.Stretch(bar._value.rectTransform);
+
+        // Track + fill
+        Image back = UIKit.AddPanel(root, "Track", t.barBack);
+        var tle = back.gameObject.AddComponent<LayoutElement>();
+        tle.minHeight = tle.preferredHeight = TrackHeight;
         Image fill = UIKit.AddPanel(back.transform, "Fill", t.accent);
         bar._fill = fill.rectTransform;
         bar._fillImage = fill;
         bar._fill.anchorMin = Vector2.zero;
         bar._fill.anchorMax = Vector2.one;
-        bar._fill.offsetMin = new Vector2(2f, 2f);
-        bar._fill.offsetMax = new Vector2(-2f, -2f);
-
-        var titleLabel = UIKit.AddLabel(back.transform, title, t.fontSizeSmall, t.text, TextAlignmentOptions.MidlineLeft);
-        UIKit.Stretch(titleLabel.rectTransform, left: 10f, right: 10f);
-
-        bar._value = UIKit.AddLabel(back.transform, "", t.fontSizeSmall, t.text, TextAlignmentOptions.MidlineRight);
-        UIKit.Stretch(bar._value.rectTransform, left: 10f, right: 10f);
+        bar._fill.offsetMin = new Vector2(1f, 1f);
+        bar._fill.offsetMax = new Vector2(-1f, -1f);
 
         return bar;
     }
@@ -219,7 +233,7 @@ public sealed class UIBar
     public void Set(float fraction01, string valueText, Color fillColor)
     {
         fraction01 = Mathf.Clamp01(fraction01);
-        // The fill is inset by 2px; scale its right anchor edge by the fraction.
+        // The fill is inset by 1px; scale its right anchor edge by the fraction.
         _fill.anchorMax = new Vector2(fraction01, 1f);
         _fillImage.color = fillColor;
         UIKit.SetText(_value, valueText);

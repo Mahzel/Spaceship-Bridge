@@ -64,7 +64,14 @@ public static class AtmosphereModel
         {
             atmo.isEnvelope = true;
             atmo.composition.Add(new ChemicalComposition { element = "H2", percentage = 86f });
-            atmo.composition.Add(new ChemicalComposition { element = "He", percentage = 14f });
+            atmo.composition.Add(new ChemicalComposition { element = "He", percentage = 13.67f });
+            // Trace gases that give a giant its visible spectrum (no RNG: the world stays the same per seed).
+            // Methane survives only in cool envelopes (hot ones turn their carbon into CO, which has no visible
+            // bands); ammonia only where it's cold enough to exist as a gas above its cloud deck, Jupiter-like.
+            if (equilibriumTempK < 700f)
+                atmo.composition.Add(new ChemicalComposition { element = "CH4", percentage = 0.3f });
+            if (equilibriumTempK < 250f)
+                atmo.composition.Add(new ChemicalComposition { element = "NH3", percentage = 0.03f });
             return atmo;
         }
 

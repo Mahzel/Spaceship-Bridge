@@ -53,25 +53,39 @@ public static class OrbitalMechanics
 
     public static Vector3 NodePosition(SystemData sys, int index, double simSeconds) => sys.PositionOf(index, simSeconds);
 
-    /// <summary>Central-difference velocity of a scripted body, game-units per simSecond. The bodies move on
-    /// closed-form (non-integrated) orbits, so a small epsilon here costs nothing in drift - it's just a
-    /// cheap way to get a body's instantaneous velocity without hand-differentiating KeplerOrbit's rotation
-    /// matrix.</summary>
-    public static Vector3 NodeVelocity(SystemData sys, int index, double simSeconds)
+    /// <summary>
+    /// A scripted body's position and velocity (game units, game units per simSecond) in DOUBLE precision:
+    /// the analytic Kepler state of each orbit up the parent chain, summed. This replaced a central
+    /// difference of float positions, which at several AU quantised velocities to ~1 km/s steps.
+    /// </summary>
+    public static void NodeState(SystemData sys, int index, double simSeconds, out Vec3d pos, out Vec3d vel)
     {
-        const double eps = 60.0;
-        Vector3 p1 = sys.PositionOf(index, simSeconds - eps);
-        Vector3 p2 = sys.PositionOf(index, simSeconds + eps);
-        return (p2 - p1) / (float)(2.0 * eps);
+        pos = Vec3d.zero;
+        vel = Vec3d.zero;
+        if (sys == null || index < 0 || index >= sys.nodes.Count) return;
+        for (int i = index; i >= 0; i = sys.nodes[i].parent)
+        {
+            NodeData n = sys.nodes[i];
+            if (!n.hasOrbit) continue;
+            KeplerOrbit.StateAt(n.orbit, simSeconds, out Vec3d p, out Vec3d v);
+            pos += p;
+            vel += v;
+        }
     }
 
-    /// <summary>Same central-difference trick for a ship's own osculating orbit.</summary>
+    /// <summary>A scripted body's velocity, game units per simSecond (analytic, see NodeState).</summary>
+    public static Vector3 NodeVelocity(SystemData sys, int index, double simSeconds)
+    {
+        NodeState(sys, index, simSeconds, out Vec3d _, out Vec3d v);
+        return v.ToVector3();
+    }
+
+    /// <summary>Velocity on a (float, clamped) element set, analytic. Kept for callers that only have
+    /// OrbitElements; the ship itself propagates with ShipOrbit's own double-precision conic.</summary>
     public static Vector3 VelocityAt(in OrbitElements el, double simSeconds)
     {
-        const double eps = 60.0;
-        Vector3 p1 = KeplerOrbit.OffsetAt(el, simSeconds - eps);
-        Vector3 p2 = KeplerOrbit.OffsetAt(el, simSeconds + eps);
-        return (p2 - p1) / (float)(2.0 * eps);
+        KeplerOrbit.StateAt(el, simSeconds, out Vec3d _, out Vec3d v);
+        return v.ToVector3();
     }
 
     /// <summary>Which body currently dominates the ship gravitationally: the innermost planet whose Hill

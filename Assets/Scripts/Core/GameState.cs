@@ -4,7 +4,7 @@ using UnityEngine;
 
 /// <summary>
 /// Runtime state of the current world / expedition. Plain C#, no scene dependencies.
-/// The save file will be: WorldSeed + atlas + wrecks + installed hardware + Trust.
+/// Saved by SaveGame (see Game.CaptureSave), including the loadout.
 /// Systems are regenerated from WorldSeed and are never saved.
 ///
 /// Anything that changes a value goes through a setter/method here so screens can subscribe to Changed.
@@ -38,8 +38,21 @@ public sealed class GameState
 
     public float Trust { get; private set; } = TrustStart;
 
+    /// <summary>Every trust change and its cause, across the expedition (see Review). Saved.</summary>
+    public readonly List<TrustChange> TrustHistory = new List<TrustChange>();
+
     // --- Hardware ----------------------------------------------------------
     private readonly Dictionary<SensorKind, SensorSpec> _installed = new Dictionary<SensorKind, SensorSpec>();
+
+    /// <summary>What the player chose at the refit. Turned into installed specs and the fitted Probe by
+    /// ApplyLoadout at every launch (ResetProbe). Saved.</summary>
+    public readonly Loadout Loadout = new Loadout();
+
+    /// <summary>The ProbeSpec asset as authored (stock modules). Probe is this with the fitted modules applied.</summary>
+    public ProbeSpec BaseProbe;
+
+    /// <summary>Every SensorSpec asset in Resources/Specs (Mk I of each sensor, plus any hand-made tier overrides).</summary>
+    public readonly List<SensorSpec> SpecAssets = new List<SensorSpec>();
 
     // --- Motion --------------------------------------------------------------
     public readonly ShipState Ship = new ShipState();
@@ -88,7 +101,10 @@ public sealed class GameState
     public GameState()
     {
         Probe = ScriptableObject.CreateInstance<ProbeSpec>(); // defaults until Game loads an asset
+        BaseProbe = Probe;
         Link = new Transmitter(this);
+        Data.CatalogueMatch = Catalogue.Match;
+        Catalogue.Seed(Atlas);
     }
 
     // ---------------------------------------------------------------------
@@ -118,25 +134,112 @@ public sealed class GameState
         if (_installed.Remove(kind)) Changed?.Invoke();
     }
 
-    /// <summary>Baseline probe: lowest-tier waterfall only (the untouchable recovery floor).</summary>
-    public void InstallBaseline(IEnumerable<SensorSpec> available)
+    /// <summary>
+    /// Fits the chosen loadout: installs exactly the chosen sensor tiers and rebuilds Probe from BaseProbe with
+    /// the chosen modules. Called at every launch (ResetProbe), so capacities are filled from the new values.
+    /// </summary>
+    public void ApplyLoadout()
     {
-        SensorSpec best = null;
-        foreach (var s in available)
-            if (s != null && s.kind == SensorKind.Waterfall && (best == null || s.tier < best.tier))
-                best = s;
-        if (best != null) InstallSensor(best);
+        _installed.Clear();
+        foreach (ProbeSystem s in Loadout.All)
+        {
+            if (!Loadout.IsSensor(s)) continue;
+            SensorSpec spec = LoadoutSpecs.Sensor(s, Loadout.Level(s), SpecAssets);
+            if (spec != null) _installed[spec.kind] = spec;
+        }
+        Probe = LoadoutSpecs.Probe(BaseProbe, Loadout);
+        Changed?.Invoke();
     }
+
+    /// <summary>
+    /// DEV ONLY (DevHud HARDWARE tab): refits the probe in flight, without resetting the run. Tracks, storage,
+    /// orbit and transmissions are kept; power and hydrogen keep their fill fraction of the new capacities. A sensor
+    /// whose tier changed gets a fresh processor (the waterfall's scrollback and a radar ping in flight are lost).
+    /// Ignores the trust budget.
+    /// </summary>
+    public void DevRefitLive()
+    {
+        float powerFrac = PowerCapacity > 0f ? PowerStored / PowerCapacity : 1f;
+        float h2Frac = HydrogenCapacity > 0f ? Hydrogen / HydrogenCapacity : 1f;
+
+        ApplyLoadout();
+
+        PowerCapacity = Probe.powerCapacity;
+        PowerStored = Mathf.Clamp01(powerFrac) * PowerCapacity;
+        HydrogenCapacity = Probe.hydrogenCapacity;
+        Hydrogen = Mathf.Clamp01(h2Frac) * HydrogenCapacity;
+        Data.Capacity = Probe.storageCapacity;
+
+        WaterfallSpec wf = GetSpec<WaterfallSpec>();
+        if (wf != null && (Waterfall == null || Waterfall.spec != wf))
+        {
+            bool on = Waterfall == null || Waterfall.Enabled;
+            float tilt = Waterfall != null ? Waterfall.AimElevationDeg : 0f;
+            Waterfall = new WaterfallProcessor(wf);
+            Waterfall.Enabled = on;
+            Waterfall.AimElevationDeg = tilt;
+        }
+        SetWaterfallLoad(wf);
+
+        RadarSpec rs = GetSpec<RadarSpec>();
+        if (rs != null && (Radar == null || Radar.spec != rs)) Radar = new RadarProcessor(rs);
+        if (Radar != null) Radar.Enabled = rs != null;
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>DEV ONLY: sets trust directly (to try the refit budget at other levels).</summary>
+    public void DevSetTrust(float trust)
+    {
+        Trust = Mathf.Clamp(trust, 0f, TrustMax);
+        Changed?.Invoke();
+    }
+
+    /// <summary>Hardware points home lends at the current trust (see Loadout.Budget).</summary>
+    public int LoadoutBudget => Loadout.Budget(Trust);
+    public bool LoadoutWithinBudget => Loadout.TotalCost <= LoadoutBudget;
     #endregion
 
     // ---------------------------------------------------------------------
     #region Run lifecycle
+    /// <summary>
+    /// New Game: forgets everything the expedition built up across runs (atlas, trust, objective), on top of
+    /// what every relaunch resets (ResetProbe, which BeginRun calls next). Installed hardware stays: that's
+    /// the baseline probe, not progress. The world seed is set separately by Game.NewGame.
+    /// </summary>
+    /// <summary>Save/load: the probe's consumables and the expedition's standing.</summary>
+    public void RestoreResources(float power, float hydrogen, float reactorLevel, float trust, string objectiveId)
+    {
+        PowerStored = Mathf.Clamp(power, 0f, PowerCapacity);
+        Hydrogen = Mathf.Clamp(hydrogen, 0f, HydrogenCapacity);
+        ReactorLevel = Mathf.Clamp01(reactorLevel);
+        Trust = Mathf.Clamp(trust, 0f, TrustMax);
+        ActiveObjectiveId = objectiveId;
+        Changed?.Invoke();
+    }
+
+    public void ResetWorld()
+    {
+        Atlas.Clear();
+        Catalogue.Seed(Atlas);
+        Trust = TrustStart;
+        TrustHistory.Clear();
+        ActiveObjectiveId = null;
+        Tracks.Clear();
+        ShipOrbit.Reset();
+        Maneuver.Clear();
+        TargetBodyName = null;
+        Loadout.ResetToBaseline();
+        Changed?.Invoke();
+    }
+
     /// <summary>
     /// Fills the probe for a new run: full power, hydrogen and storage, and the always-on loads
     /// (computer + baseline waterfall). Loads set by other systems (e.g. a scanning imager) are kept.
     /// </summary>
     public void ResetProbe()
     {
+        ApplyLoadout();
         PowerCapacity    = Probe.powerCapacity;
         PowerStored      = PowerCapacity;
         HydrogenCapacity = Probe.hydrogenCapacity;
@@ -166,13 +269,12 @@ public sealed class GameState
         }
         SetWaterfallLoad(wf);
 
-        // Radar has no installed-hardware requirement yet (same as Imager/Spectrometer): an installed
-        // RadarSpec asset is used if present, otherwise a default-valued one, so the sensor just works.
+        // The radar processor always exists (screens and RunDriver read it), but it only fires if a radar is fitted.
         RadarSpec radarSpec = GetSpec<RadarSpec>();
         if (Radar == null || (radarSpec != null && Radar.spec != radarSpec))
             Radar = new RadarProcessor(radarSpec != null ? radarSpec : ScriptableObject.CreateInstance<RadarSpec>());
         Radar.Clear();
-        Radar.Enabled = true;
+        Radar.Enabled = radarSpec != null;
 
         Changed?.Invoke();
     }
@@ -280,9 +382,6 @@ public sealed class GameState
         Trust = Mathf.Clamp(Trust + delta, 0f, TrustMax);
         Changed?.Invoke();
     }
-
-    /// <summary>Placeholder curve. Tune in playtests.</summary>
-    public float GetLoadoutBudget() => Mathf.Lerp(0.3f, 1.5f, Trust / TrustMax);
 
     /// <summary>Chance per debrief cycle that a wrong atlas entry is spotted. Placeholder.</summary>
     public float GetReviewChance(float severity01)

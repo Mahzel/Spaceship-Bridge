@@ -10,8 +10,10 @@ using UnityEngine.UI;
 /// "now" tick and every history dot just use the sample's own world bearing directly — no heading correction
 /// needed, and a contact sits still in the image even as the ship turns. A separate, distinctly-colored
 /// heading tick (drawn once, always on) sweeps across instead, marking where the ship is currently pointed.
-/// Color tiers: selected = accent, still searching (not locked) = danger — the same red as its row in the
-/// Track panel and its DSP tick, so "not locked yet" reads the same everywhere — locked = good.
+/// Color tiers: still searching (not locked) = danger — the same red as its row in the
+/// Track panel and its DSP tick, so "not locked yet" reads the same everywhere. Locked and selected use the
+/// theme's purple overlay colours (UITheme.WaterfallTrackColor): green marks vanish on the green image.
+/// Everything is placed through the screen's WaterfallView, so it follows the zoom; off-screen items hide.
 /// </summary>
 public sealed class TrackOverlay
 {
@@ -31,6 +33,7 @@ public sealed class TrackOverlay
     }
 
     private RectTransform _root;
+    private WaterfallView _view = new WaterfallView();
     private Image _bandA, _bandB;
     private readonly List<TrackVisual> _visuals = new List<TrackVisual>();
 
@@ -58,11 +61,11 @@ public sealed class TrackOverlay
     private void BuildHeadingTick()
     {
         UITheme t = UITheme.Current;
-        Image tick = UIKit.AddPanel(_root, "HeadingTick", t.warning);
+        Image tick = UIKit.AddPanel(_root, "HeadingTick", t.headingColor);
         _headingTick = tick.rectTransform;
         _headingTickImage = tick;
 
-        _headingLabel = UIKit.AddLabel(_headingTick, Loc.Get("ui.heading.tick"), t.fontSizeSmall, t.warning, TextAlignmentOptions.Center);
+        _headingLabel = UIKit.AddLabel(_headingTick, Loc.Get("ui.heading.tick"), t.fontSizeSmall, t.headingColor, TextAlignmentOptions.Center);
         RectTransform lr = _headingLabel.rectTransform;
         lr.anchorMin = lr.anchorMax = lr.pivot = new Vector2(0.5f, 1f);
         lr.anchoredPosition = new Vector2(0f, -2f);
@@ -72,19 +75,27 @@ public sealed class TrackOverlay
     // Draws the wake sector (only when limited) as a translucent band, split in two where it wraps.
     // sectorCenterDeg is already a world bearing (WakeMonitor's own doc comment), and the image is now
     // world-bearing-centered too, so no heading correction is needed here anymore.
+    // The sector [c - h, c + h] in view fractions, plus its copies one full turn left/right (the view may
+    // wrap), each clipped to the screen. At most two pieces can be visible.
     private void RefreshSector()
     {
         WakeMonitor w = Game.Wake;
         bool on = w != null && w.useSector;
-        if (!on) { _bandA.gameObject.SetActive(false); _bandB.gameObject.SetActive(false); return; }
+        _bandA.gameObject.SetActive(false);
+        _bandB.gameObject.SetActive(false);
+        if (!on) return;
 
-        float rel = BearingMath.Wrap180(w.sectorCenterDeg);
-        float x0 = (rel - w.sectorHalfDeg + 180f) / 360f;
-        float x1 = (rel + w.sectorHalfDeg + 180f) / 360f;
-
-        if (x0 >= 0f && x1 <= 1f) { SetBand(_bandA, x0, x1); _bandB.gameObject.SetActive(false); }
-        else if (x0 < 0f)         { SetBand(_bandA, 0f, x1); SetBand(_bandB, 1f + x0, 1f); }
-        else                      { SetBand(_bandA, x0, 1f); SetBand(_bandB, 0f, x1 - 1f); }
+        float c = _view.Frac(w.sectorCenterDeg);
+        float h = w.sectorHalfDeg / _view.Span;
+        float turn = 360f / _view.Span;
+        int used = 0;
+        for (int k = -1; k <= 1 && used < 2; k++)
+        {
+            float x0 = Mathf.Max(0f, c - h + k * turn), x1 = Mathf.Min(1f, c + h + k * turn);
+            if (x1 <= x0) continue;
+            SetBand(used == 0 ? _bandA : _bandB, x0, x1);
+            used++;
+        }
     }
 
     private static void SetBand(Image band, float x0, float x1)
@@ -98,9 +109,10 @@ public sealed class TrackOverlay
 
     /// <summary>processor may be null (sensor off / not built yet) — history chains are simply skipped then;
     /// the "now" ticks still show using the track's last-known (world) bearing.</summary>
-    public void Refresh(TrackManager tracks, float headingDeg, WaterfallProcessor processor)
+    public void Refresh(TrackManager tracks, float headingDeg, WaterfallProcessor processor, WaterfallView view)
     {
         if (_root == null) return;
+        if (view != null) _view = view;
         UITheme t = UITheme.Current;
         RefreshSector();
         RefreshHeadingTick(headingDeg);
@@ -110,15 +122,15 @@ public sealed class TrackOverlay
         {
             Track tr = all[i];
             TrackVisual v = GetVisual(i);
-            v.tick.gameObject.SetActive(true);
+            float xNow = _view.Frac(tr.bearing);
+            v.tick.gameObject.SetActive(_view.Visible(xNow));
 
             bool selected = tr.id == tracks.SelectedId;
             bool searching = tr.status != TrackStatus.Confirmed;
-            Color color = selected ? t.accent : (searching ? t.danger : t.good);
-            float alpha = selected ? 0.95f : (searching ? 0.85f : 0.55f);
+            Color color = t.WaterfallTrackColor(selected, searching);
+            float alpha = selected ? 0.95f : 0.85f;
             Color tickColor = color; tickColor.a = alpha;
 
-            float xNow = (BearingMath.Wrap180(tr.bearing) + 180f) / 360f;
             v.tick.anchorMin = v.tick.anchorMax = v.tick.pivot = new Vector2(xNow, 1f);
             v.tick.anchoredPosition = Vector2.zero;
             v.tick.sizeDelta = new Vector2(TickWidth, TickHeight);
@@ -137,7 +149,8 @@ public sealed class TrackOverlay
 
     private void RefreshHeadingTick(float headingDeg)
     {
-        float x = (BearingMath.Wrap180(headingDeg) + 180f) / 360f;
+        float x = _view.Frac(headingDeg);
+        _headingTick.gameObject.SetActive(_view.Visible(x));
         _headingTick.anchorMin = _headingTick.anchorMax = _headingTick.pivot = new Vector2(x, 1f);
         _headingTick.anchoredPosition = Vector2.zero;
         _headingTick.sizeDelta = new Vector2(HeadingTickWidth, TickHeight);
@@ -153,14 +166,17 @@ public sealed class TrackOverlay
         if (processor != null)
         {
             List<BearingSample> history = tr.history;
-            Color dotColor = color; dotColor.a = 0.7f;
+            Color dotColor = color; dotColor.a = 0.85f;
 
+            double oldest = processor.OldestRowTime;
             for (int i = history.Count - 1; i >= 0; i--)
             {
                 BearingSample s = history[i];
-                if (!processor.TryGetRowFraction(s.time, out float yFrac)) break; // older samples scrolled off too
+                if (s.time < oldest) break; // history is time-ordered: everything before this has scrolled off
+                if (!processor.TryGetRowFraction(s.time, out float yFrac)) continue; // scrolled off (or not on a row)
 
-                float xFrac = (BearingMath.Wrap180(s.bearing) + 180f) / 360f;
+                float xFrac = _view.Frac(s.bearing);
+                if (!_view.Visible(xFrac)) continue;
                 RectTransform dot = GetDot(v, used);
                 dot.gameObject.SetActive(true);
                 dot.anchorMin = dot.anchorMax = dot.pivot = new Vector2(xFrac, yFrac);

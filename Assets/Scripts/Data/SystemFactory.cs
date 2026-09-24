@@ -21,7 +21,7 @@ public static class SystemFactory
     // =========================================================================
     #region IDs
     public static bool IsValidSystemID(string id)
-        => id != null && Regex.IsMatch(id, @"^[A-Z]{2}-\d-\d{2}-\d{5}$");
+        => id == SolSystem.Id || (id != null && Regex.IsMatch(id, @"^[A-Z]{2}-\d-\d{2}-\d{5}$"));
 
     public static string GenerateSystemID(int seed)
     {
@@ -30,8 +30,9 @@ public static class SystemFactory
              + $"-{r.Range(0, 10)}-{r.Range(0, 100):D2}-{r.Range(0, 100000):D5}";
     }
 
-    /// <summary>The home system every probe launches from: fixed by the world seed.</summary>
-    public static string HomeSystemID(int worldSeed) => GenerateSystemID(unchecked(worldSeed ^ 0x48304D45));
+    /// <summary>The home system every probe launches from: our own Solar System, the same in every world
+    /// (hand-built, see SolSystem). The world seed only shapes the rest of the galaxy.</summary>
+    public static string HomeSystemID(int worldSeed) => SolSystem.Id;
 
     public static int HashIDToSeed(string id)
     {
@@ -47,6 +48,8 @@ public static class SystemFactory
     #region Entry point
     public static SystemData Generate(int baseSeed, string systemID)
     {
+        if (systemID == SolSystem.Id) return SolSystem.Build();
+
         int seed = unchecked(baseSeed + HashIDToSeed(systemID));
         var rng  = new SeededRandom(seed);
         var sys  = new SystemData(systemID, seed);
@@ -165,7 +168,7 @@ public static class SystemFactory
             ageGyr         = ageGyr,
             composition    = DetermineChemicalComposition("Star", rng, metallicity)
         };
-        n.spectrum = DetermineSpectrum(n.composition);
+        n.spectrum = SpectralLineTable.BuildStellar(n.temperature, n.metallicity);
         if (orbit.HasValue) { n.hasOrbit = true; n.orbit = orbit.Value; }
         sys.nodes.Add(n);
         return n.index;
@@ -294,7 +297,7 @@ public static class SystemFactory
                     orbitalPeriod      = YearsToSimSeconds(period)
                 }
             };
-            node.spectrum = DetermineSpectrum(node.composition);
+            node.spectrum = SpectralLineTable.BuildReflected(IlluminatingStarSpectrum(sys, parent), node.atmosphere);
             sys.nodes.Add(node);
 
             GenerateMoons(sys, rng, node.index, pType, pMass, sizeGame, temp, totalStarMass, systemMetallicity);
@@ -385,7 +388,7 @@ public static class SystemFactory
                     orbitalPeriod      = YearsToSimSeconds(period)
                 }
             };
-            moon.spectrum = DetermineSpectrum(moon.composition);
+            moon.spectrum = SpectralLineTable.BuildReflected(IlluminatingStarSpectrum(sys, planetIndex), moon.atmosphere);
             sys.nodes.Add(moon);
         }
     }
@@ -732,7 +735,7 @@ public static class SystemFactory
             if (bodyType == "Star")
                 foreach (var e in c) if (e.element != "H" && e.element != "He") e.percentage *= heavyScale;
             else if (bodyType == "Rocheuse")
-                foreach (var e in c) if (e.element == "Fe") e.percentage *= heavyScale;
+                foreach (var f in c) if (f.element == "Fe") f.percentage *= heavyScale;
         }
 
         // Complete lists are renormalised to 100%; the rocky list is a partial crust list.
@@ -747,34 +750,19 @@ public static class SystemFactory
         return c;
     }
 
-    /// <summary>Base intensity scale applied to every line - keeps the numbers in the same rough range the
-    /// old hand-picked per-line multipliers used, now that a line's relative strength comes from
-    /// SpectralLineTable's per-element `weight` instead of being baked into a separate constant per line.</summary>
-    private const float SpectralIntensityScale = 10f;
-
-    private static Spectrum DetermineSpectrum(List<ChemicalComposition> composition)
+    /// <summary>
+    /// The star whose light a body at node `index` reflects: the first star up its parent chain (S-type planets
+    /// and their moons), otherwise the system's most luminous star (circumbinary orbits: the brighter one dominates
+    /// the reflected spectrum). Null if the system has no star yet.
+    /// </summary>
+    public static Spectrum IlluminatingStarSpectrum(SystemData sys, int index)
     {
-        Spectrum s = new()
-        {
-            emissionLines   = new List<SpectralLine>(),
-            absorptionLines = new List<SpectralLine>()
-        };
-        foreach (var e in composition)
-        {
-            if (!SpectralLineTable.TryGet(e.element, out SpectralLineTable.Line[] lines)) continue;
-
-            foreach (SpectralLineTable.Line line in lines)
-            {
-                var sl = new SpectralLine
-                {
-                    wavelength = line.wavelength,
-                    intensity  = e.percentage * line.weight * SpectralIntensityScale,
-                    species    = e.element
-                };
-                (line.emission ? s.emissionLines : s.absorptionLines).Add(sl);
-            }
-        }
-        return s;
+        for (int i = index; i >= 0; i = sys.nodes[i].parent)
+            if (sys.nodes[i].kind == NodeKind.Star) return sys.nodes[i].spectrum;
+        NodeData best = null;
+        foreach (NodeData n in sys.nodes)
+            if (n.kind == NodeKind.Star && (best == null || n.starLuminosity > best.starLuminosity)) best = n;
+        return best != null ? best.spectrum : null;
     }
     #endregion
 

@@ -62,6 +62,40 @@ public static class KeplerOrbit
         return new Vector3((float)x, (float)y, (float)z);
     }
 
+    /// <summary>
+    /// Offset from the focus AND velocity (game units per simulated second), in double precision, analytic.
+    /// Same orbit, same 0.99 eccentricity clamp and same perifocal-to-world rotation as OffsetAt, so the
+    /// position matches what's rendered. Use this (not a finite difference of OffsetAt) wherever a velocity
+    /// feeds into physics.
+    /// </summary>
+    public static void StateAt(in OrbitElements o, double simSeconds, out Vec3d pos, out Vec3d vel)
+    {
+        double e  = Math.Min(Math.Max(o.eccentricity, 0.0), 0.99);
+        double a  = o.semiMajorAxis;
+        double M  = MeanAnomalyDeg(o, simSeconds) * Deg2Rad;
+        double E  = SolveEccentricAnomaly(M, e);
+        double cosE = Math.Cos(E), sinE = Math.Sin(E);
+        double sq = Math.Sqrt(1.0 - e * e);
+
+        double xOrb = a * (cosE - e);
+        double yOrb = a * sq * sinE;
+        double n    = o.orbitalPeriod > 0.0 ? 2.0 * Math.PI / o.orbitalPeriod : 0.0; // rad per sim second
+        double Edot = n / (1.0 - e * cosE);
+        double vxOrb = -a * sinE * Edot;
+        double vyOrb =  a * sq * cosE * Edot;
+
+        double cosO = Math.Cos(o.longitudeAscNode  * Deg2Rad), sinO = Math.Sin(o.longitudeAscNode  * Deg2Rad);
+        double cosI = Math.Cos(o.inclination       * Deg2Rad), sinI = Math.Sin(o.inclination       * Deg2Rad);
+        double cosW = Math.Cos(o.argumentPeriapsis * Deg2Rad), sinW = Math.Sin(o.argumentPeriapsis * Deg2Rad);
+
+        double m00 = cosO * cosW - sinO * sinW * cosI, m01 = -cosO * sinW - sinO * cosW * cosI;
+        double m10 = sinI * sinW,                      m11 = sinI * cosW;
+        double m20 = sinO * cosW + cosO * sinW * cosI, m21 = -sinO * sinW + cosO * cosW * cosI;
+
+        pos = new Vec3d(m00 * xOrb + m01 * yOrb, m10 * xOrb + m11 * yOrb, m20 * xOrb + m21 * yOrb);
+        vel = new Vec3d(m00 * vxOrb + m01 * vyOrb, m10 * vxOrb + m11 * vyOrb, m20 * vxOrb + m21 * vyOrb);
+    }
+
     // Newton-Raphson on Kepler's equation, radians.
     private static double SolveEccentricAnomaly(double M, double e)
     {

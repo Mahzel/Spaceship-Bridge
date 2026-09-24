@@ -61,6 +61,9 @@ public sealed class GameClock
     public void SetWarp(float multiplier, WarpUnit unit)
     {
         multiplier = Math.Max(0f, multiplier);
+        // One name per speed, the ladder's (WarpLadder): 60 s/s is 1 m/s, 60 m/s is 1 h/s. Keeps the status bar, hotkeys and settings in agreement.
+        if (multiplier >= 60f && unit == WarpUnit.Seconds) { multiplier /= 60f; unit = WarpUnit.Minutes; }
+        if (multiplier >= 60f && unit == WarpUnit.Minutes) { multiplier /= 60f; unit = WarpUnit.Hours; }
         float factor = multiplier * UnitSeconds(unit);
         WarpMultiplier = multiplier;
         WarpUnitKind   = unit;
@@ -72,6 +75,45 @@ public sealed class GameClock
     /// <summary>Back-compat: sets a raw simulated-seconds-per-real-second factor directly, expressed on the
     /// seconds axis (used by old callers / saves that only know a flat factor).</summary>
     public void SetWarp(float factor) => SetWarp(Math.Max(0f, factor), WarpUnit.Seconds);
+
+    /// <summary>Every warp the status bar can show, slowest to fastest, without duplicates (60 s = 1 m).
+    /// Used by the WarpUp/WarpDown hotkeys and the "default warp" setting.</summary>
+    public static readonly (float mult, WarpUnit unit)[] WarpLadder =
+    {
+        (1f, WarpUnit.Seconds), (10f, WarpUnit.Seconds), (30f, WarpUnit.Seconds),
+        (1f, WarpUnit.Minutes), (10f, WarpUnit.Minutes), (30f, WarpUnit.Minutes),
+        (1f, WarpUnit.Hours),   (10f, WarpUnit.Hours),   (30f, WarpUnit.Hours),
+        (1f, WarpUnit.Days),    (10f, WarpUnit.Days),    (30f, WarpUnit.Days),   (60f, WarpUnit.Days),
+    };
+
+    public static string WarpLabel(int ladderIndex)
+    {
+        var w = WarpLadder[Math.Max(0, Math.Min(WarpLadder.Length - 1, ladderIndex))];
+        string u = w.unit == WarpUnit.Seconds ? "s" : w.unit == WarpUnit.Minutes ? "m" : w.unit == WarpUnit.Hours ? "h" : "d";
+        return w.mult.ToString("0") + u;
+    }
+
+    /// <summary>Ladder rung at or just below the current warp.</summary>
+    public int WarpLadderIndex()
+    {
+        int best = 0;
+        for (int i = 0; i < WarpLadder.Length; i++)
+            if (WarpLadder[i].mult * UnitSeconds(WarpLadder[i].unit) <= WarpFactor + 1e-3f) best = i;
+        return best;
+    }
+
+    /// <summary>Moves one rung up (+1) or down (-1) the ladder.</summary>
+    public void StepWarp(int dir)
+    {
+        int i = Math.Max(0, Math.Min(WarpLadder.Length - 1, WarpLadderIndex() + Math.Sign(dir)));
+        SetWarp(WarpLadder[i].mult, WarpLadder[i].unit);
+    }
+
+    public void SetWarpLadder(int ladderIndex)
+    {
+        var w = WarpLadder[Math.Max(0, Math.Min(WarpLadder.Length - 1, ladderIndex))];
+        SetWarp(w.mult, w.unit);
+    }
 
     public static float UnitSeconds(WarpUnit unit)
     {

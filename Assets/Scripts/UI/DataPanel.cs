@@ -15,7 +15,8 @@ public sealed class DataPanel
     {
         public GameObject go;
         public TextMeshProUGUI name, size, value, status;
-        public Button dump, send;
+        public Button dump, send, conf;
+        public TextMeshProUGUI confLabel;
         public int recordId;
     }
 
@@ -69,6 +70,8 @@ public sealed class DataPanel
         row.size   = Cell(rt, 80f, t.text);
         row.value  = Cell(rt, 80f, t.text);
         row.status = Cell(rt, 90f, t.textDim);
+        row.conf   = UIKit.AddButton(rt, "", () => ToggleConfidence(row), 34f, 30f);
+        row.confLabel = row.conf.GetComponentInChildren<TextMeshProUGUI>();
         row.send   = UIKit.AddButton(rt, Loc.Get("ui.tx.send"), () => Send(row), 40f, 30f);
         row.dump   = UIKit.AddButton(rt, Loc.Get("ui.data.dump"), () => Dump(row), 34f, 30f);
 
@@ -119,6 +122,16 @@ public sealed class DataPanel
         if (rec != null) Game.State.Link.Send(rec, out why); // the button is disabled when it cannot be afforded
     }
 
+    /// <summary>Declared confidence: Tentative (T) pays less and costs little if wrong, Confirmed (C) pays full
+    /// and hurts if caught wrong at a later review. What is SENT keeps the value it had at send time.</summary>
+    private static void ToggleConfidence(Row row)
+    {
+        if (Game.State == null) return;
+        DataRecord rec = Game.State.Data.Find(row.recordId);
+        if (rec == null) return;
+        rec.confidence = rec.confidence == Confidence.Tentative ? Confidence.Confirmed : Confidence.Tentative;
+    }
+
     private static void Dump(Row row)
     {
         if (Game.State != null) Game.State.Data.Remove(row.recordId);
@@ -159,9 +172,13 @@ public sealed class DataPanel
             UIKit.SetText(r.name,  Loc.Get("ui.data.rowname", rec.label, kind, rec.systemId));
             UIKit.SetText(r.size,  Loc.Get("ui.data.size", rec.size));
             UIKit.SetText(r.value, Loc.Get("ui.data.value", rec.value));
+            bool confirmed = rec.confidence == Confidence.Confirmed;
+            UIKit.SetText(r.confLabel, Loc.Get(confirmed ? "ui.data.conf.c" : "ui.data.conf.t"));
+            UIKit.SetButtonActive(r.conf, confirmed);
             int sent = Game.State.Link.SentCount(rec.id);
             r.send.interactable = flying && Game.State.Link.EnergyFor(rec, Game.State.Link.PowerLevel, Game.State.Link.Robust) < Game.State.PowerStored;
-            UIKit.SetText(r.status, rec.recording ? Loc.Get("ui.data.rec")
+            UIKit.SetText(r.status, rec.catalogueName != null ? Loc.Get("ui.data.known", rec.catalogueName)
+                                   : rec.recording ? Loc.Get("ui.data.rec")
                                    : sent > 0 ? Loc.Get("ui.tx.sent", sent)
                                    : rec.stopReason == "lost" ? Loc.Get("ui.data.lost")
                                    : rec.stopReason == "full" ? Loc.Get("ui.data.full") : "");

@@ -1,18 +1,22 @@
 using System.Collections.Generic;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using static UnityEngine.Object; // plain C# class (not a MonoBehaviour): FindObjectsByType isn't inherited here
 
 /// <summary>
-/// System overview: a row-list table of every detected celestial body (name / az / el / distance), replacing
-/// the old ComputerScreen-driven table that read a scene-wired "spaceEnvironment" transform. Bodies are found
-/// the same way every other screen finds them (FindObjectsByType&lt;CelestialBody&gt;), so no Inspector wiring
-/// is needed. Rows are clickable: selecting one sets GameState.TargetBodyName (via Game.State.SetTarget), used
-/// by the NODE tab's "plot a transfer to X" (ManeuverPlan.SolveHohmann matches it back to a NodeData by name,
-/// which is exactly what CelestialBody.bodyName was assigned from - see SystemManager.Spawn). Otherwise purely
-/// informational — unlike the imager/spectrometer, there's nothing to arm or power down, so Hide() is a no-op;
-/// the table stays cheap to refresh even while off-screen.
+/// System overview built from TRACKS, not from the scene: one row per contact in Game.State.Tracks, showing only
+/// what the sensors have measured. It never looks at CelestialBody. The omniscient table that used to live here
+/// belongs in the dev overlay.
+///
+/// A row fills in as the contact is characterised (TrackManager.LevelOf):
+///   Bearing    - just marked: bearing only, status SEARCH until the tracker locks it;
+///   Rate       - locked, with a fitted bearing rate;
+///   Ranged     - a usable range from TMA (after a manoeuvre) or radar, with its 1-sigma;
+///   Identified - spectrometer dwell complete: class, and composition / atmosphere or stellar data.
+/// Clicking a row selects that track everywhere (Track panel, radar TRACK mode, SEL on the imager and
+/// spectrometer). Once the contact is identified, it also becomes the NODE tab's transfer target, which
+/// needs the catalog match to know what to plot to. Purely informational otherwise, so Hide() is a no-op.
 /// </summary>
 public sealed class SystemScreen
 {
@@ -23,13 +27,14 @@ public sealed class SystemScreen
     {
         public GameObject go;
         public Button button;
-        public TextMeshProUGUI name, cls, az, el, dist;
+        public TextMeshProUGUI name, status, brg, range, cls, detail;
+        public int trackId;
     }
 
     private readonly List<Row> _rows = new List<Row>();
-    private readonly List<CelestialBody> _bodies = new List<CelestialBody>();
-    private TextMeshProUGUI _empty;
-    private float _accum;
+    private TextMeshProUGUI _empty, _details;
+    private float _accum = RefreshInterval;
+    private readonly StringBuilder _sb = new StringBuilder();
 
     public GameObject Build(Transform parent)
     {
@@ -37,7 +42,7 @@ public sealed class SystemScreen
 
         RectTransform root = UIKit.Node("System", parent);
         UIKit.Size(root, flexibleWidth: 1f);
-        var v = UIKit.VStack(root, t.spacing, 0);
+        var v = UIKit.VStack(root, t.spacing * 0.5f, 0);
         v.childAlignment = TextAnchor.UpperLeft;
         var fit = root.gameObject.AddComponent<ContentSizeFitter>();
         fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
@@ -47,28 +52,29 @@ public sealed class SystemScreen
         _empty = UIKit.AddLabel(root, Loc.Get("ui.system.none"), t.fontSizeSmall, t.textDim);
         for (int i = 0; i < MaxRows; i++) _rows.Add(BuildRow(root));
 
-        RefreshBodies();
-        Populate();
+        UIKit.AddSpacer(root, 6f);
+        _details = UIKit.AddLabel(root, "", t.fontSizeSmall, t.text);
+        _details.textWrappingMode = TextWrappingModes.Normal;
+        _details.richText = true;
 
         return root.gameObject;
     }
+
+    // Column widths: name, status, bearing, range, class, detail.
+    private static readonly float[] Widths = { 110f, 80f, 80f, 170f, 130f, 280f };
 
     private void BuildHeader(Transform parent)
     {
         UITheme t = UITheme.Current;
         RectTransform row = UIKit.Node("Header", parent);
         UIKit.HStack(row, 6f, 0);
-
-        TextMeshProUGUI name = UIKit.AddLabel(row, Loc.Get("ui.system.col.name"), t.fontSizeSmall, t.textDim);
-        UIKit.Size(name.rectTransform, preferredWidth: 200f);
-        TextMeshProUGUI cls = UIKit.AddLabel(row, Loc.Get("ui.system.col.class"), t.fontSizeSmall, t.textDim);
-        UIKit.Size(cls.rectTransform, preferredWidth: 110f);
-        TextMeshProUGUI az = UIKit.AddLabel(row, Loc.Get("ui.system.col.az"), t.fontSizeSmall, t.textDim);
-        UIKit.Size(az.rectTransform, preferredWidth: 80f);
-        TextMeshProUGUI el = UIKit.AddLabel(row, Loc.Get("ui.system.col.el"), t.fontSizeSmall, t.textDim);
-        UIKit.Size(el.rectTransform, preferredWidth: 80f);
-        TextMeshProUGUI dist = UIKit.AddLabel(row, Loc.Get("ui.system.col.dist"), t.fontSizeSmall, t.textDim);
-        UIKit.Size(dist.rectTransform, preferredWidth: 100f);
+        string[] keys = { "ui.system.col.name", "ui.system.col.status", "ui.system.col.brg",
+                          "ui.system.col.range", "ui.system.col.class", "ui.system.col.detail" };
+        for (int i = 0; i < keys.Length; i++)
+        {
+            TextMeshProUGUI l = UIKit.AddLabel(row, Loc.Get(keys[i]), t.fontSizeSmall, t.textDim);
+            UIKit.Size(l.rectTransform, preferredWidth: Widths[i]);
+        }
     }
 
     private Row BuildRow(Transform parent)
@@ -80,68 +86,43 @@ public sealed class SystemScreen
         row.go = rt.gameObject;
         UIKit.HStack(rt, 6f, 0);
 
-        // Invisible raycastable background makes the whole row clickable (target selection), not just the text.
+        // Invisible raycastable background makes the whole row clickable, not just the text.
         Image bg = rt.gameObject.AddComponent<Image>();
         bg.color = new Color(0f, 0f, 0f, 0f);
         bg.raycastTarget = true;
         row.button = rt.gameObject.AddComponent<Button>();
+        row.button.onClick.AddListener(() => Select(row.trackId));
 
-        row.name = UIKit.AddLabel(rt, "", t.fontSizeSmall, t.text);
-        UIKit.Size(row.name.rectTransform, preferredWidth: 200f);
-        row.cls = UIKit.AddLabel(rt, "", t.fontSizeSmall, t.textDim);
-        UIKit.Size(row.cls.rectTransform, preferredWidth: 110f);
-        row.az = UIKit.AddLabel(rt, "", t.fontSizeSmall, t.text);
-        UIKit.Size(row.az.rectTransform, preferredWidth: 80f);
-        row.el = UIKit.AddLabel(rt, "", t.fontSizeSmall, t.text);
-        UIKit.Size(row.el.rectTransform, preferredWidth: 80f);
-        row.dist = UIKit.AddLabel(rt, "", t.fontSizeSmall, t.text);
-        UIKit.Size(row.dist.rectTransform, preferredWidth: 100f);
+        row.name   = Cell(rt, 0, t.text);
+        row.status = Cell(rt, 1, t.textDim);
+        row.brg    = Cell(rt, 2, t.text);
+        row.range  = Cell(rt, 3, t.text);
+        row.cls    = Cell(rt, 4, t.text);
+        row.detail = Cell(rt, 5, t.textDim);
 
         row.go.SetActive(false);
         return row;
     }
 
-    private void RefreshBodies()
+    private static TextMeshProUGUI Cell(Transform row, int col, Color color)
     {
-        CelestialBody[] found = FindObjectsByType<CelestialBody>(FindObjectsSortMode.None);
-        _bodies.Clear();
-        foreach (CelestialBody b in found)
-            if (!string.IsNullOrEmpty(b.bodyName)) _bodies.Add(b);
-        _bodies.Sort((a, b) => string.CompareOrdinal(a.bodyName, b.bodyName));
+        TextMeshProUGUI l = UIKit.AddLabel(row, "", UITheme.Current.fontSizeSmall, color);
+        UIKit.Size(l.rectTransform, preferredWidth: Widths[col]);
+        l.overflowMode = TextOverflowModes.Ellipsis;
+        return l;
     }
 
-    private void Populate()
+    private static void Select(int trackId)
     {
-        _empty.gameObject.SetActive(_bodies.Count == 0);
-
-        for (int i = 0; i < _rows.Count; i++)
-        {
-            Row r = _rows[i];
-            if (i >= _bodies.Count)
-            {
-                if (r.go.activeSelf) r.go.SetActive(false);
-                continue;
-            }
-
-            CelestialBody b = _bodies[i];
-            if (!r.go.activeSelf) r.go.SetActive(true);
-
-            UIKit.SetText(r.name, b.bodyName);
-            UIKit.SetText(r.cls, !string.IsNullOrEmpty(b.surfaceClass) ? b.surfaceClass : b.bodyType);
-            UIKit.SetText(r.az, Mathf.Repeat(b.azimuth, 360f).ToString("000.0") + "°");
-            UIKit.SetText(r.el, b.elevation.ToString("+000.0;-000.0") + "°");
-            UIKit.SetText(r.dist, b.distance.ToString("0.0") + " u");
-
-            string name = b.bodyName;
-            r.button.onClick.RemoveAllListeners();
-            r.button.onClick.AddListener(() => Game.State?.SetTarget(name));
-
-            bool selected = Game.State != null && Game.State.TargetBodyName == name;
-            r.name.color = selected ? UITheme.Current.accent : UITheme.Current.text;
-        }
+        if (Game.State == null || trackId == 0) return;
+        TrackManager tm = Game.State.Tracks;
+        tm.SelectedId = trackId;
+        Track tr = tm.Find(trackId);
+        // The NODE tab plots to a catalog body, which only exists once the contact is identified.
+        Game.State.SetTarget(tr != null && tr.info.identified ? tr.info.catalogName : null);
     }
 
-    /// <summary>Called by SensorConsole when another mode is selected. No-op: purely informational, nothing to stop.</summary>
+    /// <summary>Called by SensorConsole when another mode is selected. No-op: purely informational.</summary>
     public void Hide() { }
 
     /// <summary>Called every frame by SensorConsole, regardless of whether this mode is the one showing.</summary>
@@ -150,7 +131,159 @@ public sealed class SystemScreen
         _accum += unscaledDeltaSeconds;
         if (_accum < RefreshInterval) return;
         _accum = 0f;
-        RefreshBodies();
         Populate();
+    }
+
+    private void Populate()
+    {
+        if (Game.State == null) return;
+        UITheme t = UITheme.Current;
+        TrackManager tm = Game.State.Tracks;
+        IList<Track> all = tm.All;
+
+        _empty.gameObject.SetActive(all.Count == 0);
+
+        Track selected = null;
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            Row r = _rows[i];
+            if (i >= all.Count)
+            {
+                if (r.go.activeSelf) r.go.SetActive(false);
+                continue;
+            }
+
+            Track tr = all[i];
+            if (!r.go.activeSelf) r.go.SetActive(true);
+            r.trackId = tr.id;
+            bool isSel = tr.id == tm.SelectedId;
+            if (isSel) selected = tr;
+
+            TrackLevel level = TrackManager.LevelOf(tr);
+            TrackInfo info = tr.info;
+
+            UIKit.SetText(r.name, tr.name);
+            r.name.color = isSel ? t.accent : (tr.Locked ? t.text : t.danger);
+
+            UIKit.SetText(r.status, tr.Locked ? Loc.Get("ui.system.lock") : Loc.Get("ui.system.search"));
+            r.status.color = tr.Locked ? t.textDim : t.danger;
+
+            UIKit.SetText(r.brg, Loc.Get("ui.system.brg", tr.bearing));
+            UIKit.SetText(r.range, RangeText(tr));
+
+            if (level == TrackLevel.Identified)
+            {
+                string cls = !string.IsNullOrEmpty(info.surfaceClass) ? info.surfaceClass : info.bodyType;
+                UIKit.SetText(r.cls, info.blended ? cls + "?" : cls);
+                r.cls.color = info.blended ? t.warning : t.text;
+                UIKit.SetText(r.detail, ShortDetail(info));
+            }
+            else
+            {
+                UIKit.SetText(r.cls, info.specDwellSeconds > 0f ? Loc.Get("ui.system.analyzing") : Loc.Get("ui.system.unknown"));
+                r.cls.color = t.textDim;
+                UIKit.SetText(r.detail, "");
+            }
+        }
+
+        UIKit.SetText(_details, selected != null ? LongDetail(selected) : Loc.Get("ui.system.selecthint"));
+    }
+
+    private static string RangeText(Track tr)
+    {
+        RangeEstimate re = tr.range;
+        bool usable = re.valid && (re.Observable || tr.radarFix.valid);
+        if (!usable) return Loc.Get("ui.system.norange");
+        double au = re.range / GameConstants.GAME_UNITS_PER_UA;
+        double sig = re.rangeSigma / GameConstants.GAME_UNITS_PER_UA;
+        return Loc.Get("ui.system.range", au, sig);
+    }
+
+    private string ShortDetail(TrackInfo info)
+    {
+        if (info.isStar)
+            return Loc.Get("ui.system.star.short", info.temperatureK, info.metallicity, info.ageGyr);
+
+        Atmosphere a = info.atmosphere;
+        if (a == null || a.composition == null || a.composition.Count == 0 || (!a.isEnvelope && a.surfacePressureAtm <= 0f))
+            return Loc.Get("ui.system.airless", info.surfaceTemperatureK > 0f ? info.surfaceTemperatureK : info.temperatureK);
+
+        _sb.Length = 0;
+        AppendTopGases(_sb, a.composition, 2);
+        if (a.isEnvelope) _sb.Append("  ").Append(Loc.Get("ui.system.envelope"));
+        else _sb.Append("  ").Append(Loc.Get("ui.system.pressure", a.surfacePressureAtm));
+        return _sb.ToString();
+    }
+
+    private string LongDetail(Track tr)
+    {
+        TrackInfo info = tr.info;
+        _sb.Length = 0;
+        _sb.Append("<b>").Append(tr.name).Append("</b>   ");
+        _sb.Append(Loc.Get("ui.system.brg", tr.bearing));
+        if (tr.hasRate) _sb.Append("   ").Append(Loc.Get("ui.track.rate", tr.rateDegPerDay));
+        _sb.Append("   ").Append(RangeText(tr));
+        if (tr.hasElevation)
+        {
+            double now = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
+            _sb.Append("   ").Append(Loc.Get("ui.system.el", tr.elevationDeg, TrackManager.AgedElevationSigma(tr, now), tr.elevationSource));
+        }
+        else _sb.Append("   ").Append(Loc.Get("ui.system.noel"));
+        if (tr.hasRadarRate && tr.radarFix.valid)
+            _sb.Append("   ").Append(Loc.Get("ui.system.rrate", tr.radarRangeRateKmS));
+        _sb.Append('\n');
+
+        if (!info.identified)
+        {
+            if (!tr.Locked) _sb.Append(Loc.Get("ui.system.hint.lock"));
+            else if (info.specDwellSeconds > 0f) _sb.Append(Loc.Get("ui.system.hint.dwell"));
+            else _sb.Append(Loc.Get("ui.system.hint.spec"));
+            return _sb.ToString();
+        }
+
+        string cls = !string.IsNullOrEmpty(info.surfaceClass) ? info.surfaceClass : info.bodyType;
+        _sb.Append(Loc.Get("ui.system.class", cls));
+        if (info.blended) _sb.Append("   <color=#").Append(ColorUtility.ToHtmlStringRGB(UITheme.Current.warning))
+                             .Append('>').Append(Loc.Get("ui.system.blend")).Append("</color>");
+        _sb.Append('\n');
+
+        if (info.isStar)
+        {
+            _sb.Append(Loc.Get("ui.system.star.long", info.temperatureK, info.metallicity, info.ageGyr)).Append('\n');
+        }
+        else
+        {
+            _sb.Append(Loc.Get("ui.system.temps", info.temperatureK, info.surfaceTemperatureK)).Append('\n');
+            Atmosphere a = info.atmosphere;
+            if (a == null || a.composition == null || a.composition.Count == 0 || (!a.isEnvelope && a.surfacePressureAtm <= 0f))
+                _sb.Append(Loc.Get("ui.system.atmo.none"));
+            else
+            {
+                _sb.Append(Loc.Get(a.isEnvelope ? "ui.system.atmo.envelope" : "ui.system.atmo", a.surfacePressureAtm)).Append(' ');
+                AppendTopGases(_sb, a.composition, 5);
+            }
+            _sb.Append('\n');
+        }
+
+        if (info.composition.Count > 0)
+        {
+            _sb.Append(Loc.Get("ui.system.comp")).Append(' ');
+            AppendTopGases(_sb, info.composition, 6);
+        }
+        return _sb.ToString();
+    }
+
+    private static void AppendTopGases(StringBuilder sb, List<ChemicalComposition> list, int max)
+    {
+        // Largest first, without disturbing the source list.
+        var sorted = new List<ChemicalComposition>(list);
+        sorted.Sort((x, y) => y.percentage.CompareTo(x.percentage));
+        int n = Mathf.Min(max, sorted.Count);
+        for (int i = 0; i < n; i++)
+        {
+            if (i > 0) sb.Append(' ');
+            // A literal '%' rather than a "P" format: "P" takes its glyph from the culture (see SpectrometerScreen).
+            sb.Append(sorted[i].element).Append(' ').Append(sorted[i].percentage.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)).Append('%');
+        }
     }
 }

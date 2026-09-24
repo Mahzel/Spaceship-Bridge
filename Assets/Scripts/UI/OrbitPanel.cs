@@ -43,6 +43,18 @@ public sealed class OrbitPanel
         if (_primary == null) return;
         ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
 
+        if (orbit != null && orbit.Hyperbolic)
+        {
+            // Unbound: show the escape trajectory rather than "no orbit".
+            float g = GameConstants.GAME_UNITS_PER_UA;
+            UIKit.SetText(_primary, Loc.Get("ui.orbit.escape", orbit.PrimaryName));
+            UIKit.SetText(_apsides, Loc.Get("ui.orbit.peri", Loc.Distance(orbit.PeriapsisGame / g)));
+            UIKit.SetText(_shape,   Loc.Get("ui.orbit.shape", (float)orbit.Eccentricity, orbit.Elements.inclination));
+            UIKit.SetText(_period,  Loc.Get("ui.orbit.vinf", System.Math.Sqrt(orbit.Mu / -orbit.SemiMajorAxis) * ShipState.KmPerUnit));
+            UIKit.SetText(_now,     Loc.Get("ui.orbit.nu", orbit.TrueAnomalyDeg));
+            return;
+        }
+
         if (orbit == null || !orbit.Valid)
         {
             UIKit.SetText(_primary, Loc.Get("ui.orbit.none"));
@@ -59,8 +71,8 @@ public sealed class OrbitPanel
         double periodDays = orbit.Elements.orbitalPeriod / 86400.0;
 
         UIKit.SetText(_primary, Loc.Get("ui.orbit.primary", orbit.PrimaryName));
-        UIKit.SetText(_apsides, Loc.Get("ui.orbit.apsides", periAu, apoAu));
-        UIKit.SetText(_shape,   Loc.Get("ui.orbit.shape", orbit.Elements.eccentricity, orbit.Elements.inclination));
+        UIKit.SetText(_apsides, Loc.Get("ui.orbit.apsides", Loc.Distance(periAu), Loc.Distance(apoAu)));
+        UIKit.SetText(_shape,   Loc.Get("ui.orbit.shape", (float)orbit.Eccentricity, orbit.Elements.inclination));
         UIKit.SetText(_period,  Loc.Get("ui.orbit.period", periodDays));
         UIKit.SetText(_now,     Loc.Get("ui.orbit.nu", orbit.TrueAnomalyDeg));
     }

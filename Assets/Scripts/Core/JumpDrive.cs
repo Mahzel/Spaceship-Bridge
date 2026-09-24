@@ -47,6 +47,14 @@ public sealed class JumpDrive
 
     public double DistanceFromHomeLy { get { return Math.Sqrt(X * X + Z * Z); } }
 
+    /// <summary>Save/load: where the probe is in the galaxy.</summary>
+    public void Restore(string systemId, double x, double z)
+    {
+        CurrentSystemId = systemId;
+        X = x; Z = z;
+        _nearbyFor = null;
+    }
+
     public void ResetToHome()
     {
         GalaxySystem home = Galaxy.Home(_state.WorldSeed);

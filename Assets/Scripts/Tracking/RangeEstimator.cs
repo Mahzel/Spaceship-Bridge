@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>Result of bearing-only target motion analysis. An estimate with an uncertainty, never the truth.</summary>
+[System.Serializable]
 public struct RangeEstimate
 {
     public bool   valid;

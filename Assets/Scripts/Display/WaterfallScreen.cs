@@ -282,6 +282,19 @@ public sealed class WaterfallScreen
         else tm.MarkBearing(time, bearing, p.spec.maxTracks);
     }
 
+    /// <summary>Point-sample a texture with far more bins than screen pixels (a fine tier zoomed out) and the
+    /// GPU's nearest-neighbour minification aliases into a moire that reads as a diagonal streak drifting up the
+    /// image as it scrolls - worse the finer the array (Mk III's beam is a quarter of Mk I's, so Bins can run to
+    /// ~4x more before UsefulBins/maxBins caps it). Point stays crisp (and un-aliased) whenever the visible
+    /// slice actually fits in the display's pixels; only switch to the mip-mapped Trilinear filter when it's
+    /// genuinely being minified.</summary>
+    private void RefreshFilterMode(WaterfallProcessor p)
+    {
+        float visibleBins = p.Bins / _view.Zoom;
+        FilterMode desired = visibleBins > DisplayW ? FilterMode.Trilinear : FilterMode.Point;
+        if (p.Texture.filterMode != desired) p.Texture.filterMode = desired;
+    }
+
     private void Tilt(float deltaDeg)
     {
         WaterfallProcessor p = Processor;
@@ -375,6 +388,7 @@ public sealed class WaterfallScreen
         }
 
         if (_image.texture != p.Texture) _image.texture = p.Texture;
+        RefreshFilterMode(p);
         Rect uv = p.UvRect;
         float ux, uw;
         _view.UvX(out ux, out uw);

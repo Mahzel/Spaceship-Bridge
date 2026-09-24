@@ -202,23 +202,28 @@ public class CelestialBody : MonoBehaviour
 
     #region Hierarchy Helpers
     /// <summary>
-    /// Remonte la hiérarchie pour trouver l'étoile parente.
-    /// Fonctionne pour les cas simples (planète → étoile) et complexes
-    /// (planète → barycentre → étoile binaire : on prend la plus proche).
+    /// Remonte la hiérarchie pour trouver l'étoile parente. Marche sur TOUTE la chaîne de parents, pas
+    /// seulement le premier niveau: une lune a pour parent direct sa planète (pas l'étoile), donc s'arrêter
+    /// à un seul niveau laissait FindParentStar renvoyer null pour toute lune - phase et apparentLuminosity
+    /// retombaient à 0 (voir Reset/UpdateObservables), d'où un albedo/luminosité apparents toujours nuls.
+    /// Fonctionne pour les cas simples (planète → étoile), les lunes (lune → planète → étoile) et les cas
+    /// complexes (planète → barycentre → étoile binaire : on prend la plus proche).
     /// </summary>
     private CelestialBody FindParentStar()
     {
-        // Cas simple : parent direct est une étoile
-        if (transform.parent != null)
+        for (Transform t = transform.parent; t != null; t = t.parent)
         {
-            CelestialBody parent = transform.parent.GetComponent<CelestialBody>();
-            if (parent != null && parent.starLuminosity > 0f)
-                return parent;
+            CelestialBody body = t.GetComponent<CelestialBody>();
+            if (body != null && body.starLuminosity > 0f)
+                return body;
 
             // Cas barycentre : chercher parmi les frères et sœurs
-            Barycenter barycenter = transform.parent.GetComponent<Barycenter>();
+            Barycenter barycenter = t.GetComponent<Barycenter>();
             if (barycenter != null)
-                return FindNearestStar(barycenter.bodies);
+            {
+                CelestialBody star = FindNearestStar(barycenter.bodies);
+                if (star != null) return star;
+            }
         }
 
         return null;

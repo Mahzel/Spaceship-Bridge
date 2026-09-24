@@ -27,9 +27,15 @@ public sealed class WaterfallTexture
         Height = Mathf.Max(1, height);
         _row   = new Color32[Width];
 
-        Texture = new Texture2D(Width, Height, TextureFormat.RGBA32, false)
+        // Mip chain on: at a fine tier (Mk III) Bins can run well past the display's pixel width, and GPU
+        // minification with no mips under Point filtering aliases into a moire that reads as a diagonal streak
+        // drifting up the image as it scrolls - the sensor doing nothing wrong, just the texture being point-
+        // sampled far below its native resolution. WaterfallScreen switches filterMode to Trilinear (using this
+        // chain) only when the visible slice is actually being minified, and back to Point (still crisp,
+        // un-aliased) whenever it isn't - see its Refresh().
+        Texture = new Texture2D(Width, Height, TextureFormat.RGBA32, true)
         {
-            filterMode = FilterMode.Point,   // crisp bins
+            filterMode = FilterMode.Point,   // crisp bins - default; WaterfallScreen may switch to Trilinear
             wrapModeU  = TextureWrapMode.Repeat, // bearing wraps at +/-180: a zoomed view may straddle it
             wrapModeV  = TextureWrapMode.Repeat, // needed for the ring-buffer scroll
             name       = "WaterfallTexture"
@@ -59,7 +65,7 @@ public sealed class WaterfallTexture
         var black = new Color32[Width * Height];
         for (int i = 0; i < black.Length; i++) black[i] = new Color32(0, 0, 0, 255);
         Texture.SetPixels32(black);
-        Texture.Apply(false);
+        Texture.Apply(true);
         _head = 0;
     }
 
@@ -73,7 +79,10 @@ public sealed class WaterfallTexture
         }
 
         Texture.SetPixels32(0, _head, Width, 1, _row);
-        Texture.Apply(false);
+        // updateMipmaps = true: regenerates the whole chain, not just the touched row (Unity has no partial-mip
+        // update). One line lands every lineIntervalSeconds/warp (>= minUpdateInterval) real seconds, not every
+        // frame, so this stays cheap relative to that cadence even at the largest (Mk III) texture size.
+        Texture.Apply(true);
         _head = (_head + 1) % Height;
     }
 

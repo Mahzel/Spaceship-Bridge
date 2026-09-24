@@ -107,6 +107,13 @@ content area the active major mode fills completely.
 - **`UI/DraggablePanel.cs`** is now dead code - nothing calls `Attach` anymore. Left in place rather than
   deleted: it's a small, self-contained, still-correct utility, and `MenuUI`/`RefitScreen`/`DebriefScreen`
   could plausibly want it later. Delete it in a follow-up if it's still unused once those three are decided.
+- **Update (2026-09-24):** bumped the three fixed-pixel sensor plot sizes up, per user feedback that Waterfall
+  and Spectrometer looked cramped with dead space below them, and Radar's square scope had room to grow:
+  `WaterfallScreen.DisplayH` 260→440 (UI sizing only, doesn't touch `WaterfallTexture`'s own resolution),
+  `SpectrometerScreen.SpecH` 150→320 (this one IS the texture's actual pixel height, so a real resolution
+  gain), `RadarScreen.ScopeSize` 440→600 with its controls column trimmed 400→340 to match (the elevation
+  row's own content - label + steppers + the longest EL readout string - needs ~340, so that's the floor
+  without the "+" stepper button overlapping the text).
 - Sensors/Comms/Systems content doesn't yet fill 100% of its major mode's vertical space - each tab body
   auto-heights from its own content (unchanged from before), so there's blank space below shorter panels
   (Jump/Node/Reactor/Wake/Data/Tx) inside their now-taller container. Not broken, just not making full use of

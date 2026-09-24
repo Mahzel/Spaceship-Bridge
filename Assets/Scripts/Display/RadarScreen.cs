@@ -25,7 +25,8 @@ using UnityEngine.UI;
 /// </summary>
 public sealed class RadarScreen
 {
-    private const int ScopeSize = 440;
+    private const int ScopeSize = 600; // was 440 - grown to use more of the tab's vertical room, square scope
+                                        // stays square; the controls column narrowed to make space (see Build)
     private const float ScopeMargin = 8f;
     private const float RedrawInterval = 0.1f;
     private const float ReturnPickPx = 10f;
@@ -91,7 +92,9 @@ public sealed class RadarScreen
         BuildScope(root);
 
         RectTransform side = UIKit.Node("Controls", root);
-        UIKit.Size(side, preferredWidth: 400f);
+        UIKit.Size(side, preferredWidth: 340f); // was 400 - the elevation row's own content (label+steppers+
+                                                 // the longest EL readout string) needs ~340, so that's the
+                                                 // floor; trimming further would overlap the "+" stepper
         var v = UIKit.VStack(side, t.spacing, 0);
         v.childAlignment = TextAnchor.UpperLeft;
 

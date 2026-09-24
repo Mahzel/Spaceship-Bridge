@@ -26,7 +26,8 @@ using UnityEngine.UI;
 public sealed class WaterfallScreen
 {
     private const int DisplayW = 860;
-    private const int DisplayH = 260;
+    private const int DisplayH = 440; // taller plot area (was 260) - UI sizing only, WaterfallTexture's own
+                                       // pixel height comes from Bins/lines in WaterfallProcessor, unaffected
     private const int DspH = 70;
     private const float DspTickWidth = 1.5f;
     private const float TiltStepDeg = 5f;

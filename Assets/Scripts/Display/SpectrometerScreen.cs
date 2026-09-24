@@ -39,7 +39,9 @@ using static UnityEngine.Object; // plain C# class (not a MonoBehaviour): Destro
 public sealed class SpectrometerScreen
 {
     private const int SpecW = 420;
-    private const int SpecH = 150;
+    private const int SpecH = 320; // taller plot area (was 150) - this IS the actual texture pixel height
+                                    // (CreateTexture/DrawLine work in SpecH units directly), so it's a real
+                                    // resolution gain, not just a bigger rect around the same bitmap
     private const int DspH = 80;
     private const float RedrawInterval = 0.2f;
     private const int MaxLabels = 20;

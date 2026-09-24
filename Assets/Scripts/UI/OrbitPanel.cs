@@ -7,9 +7,11 @@ using UnityEngine.UI;
 /// orbiting, periapsis/apoapsis, eccentricity, inclination and period. Read-only for now - maneuver-node
 /// planning is a later pass. Reads Game.State.ShipOrbit.
 ///
-/// Lives pinned to the bottom-right corner of the NAV minor mode's content (Navigation major mode, UI shell
-/// rework) - no longer a draggable floating window anchored to the whole canvas. Build's `parent` is that
-/// NAV tab's own root rect, so "bottom-right" here means bottom-right of THAT, not the screen.
+/// Lives pinned to the bottom-right corner of NavScreen's own map rect (Navigation major mode, UI shell
+/// rework) - no longer a draggable floating window anchored to the whole canvas, and no longer pinned to the
+/// whole NAV tab body either (that put it behind the sidebar's bottom controls). Build's `parent` is
+/// NavScreen's _mapRect, so "bottom-right" here means bottom-right of the map itself. See TrackOrbitPanel for
+/// its bottom-left counterpart (the selected track's fitted orbit, not the ship's own).
 /// </summary>
 public sealed class OrbitPanel
 {

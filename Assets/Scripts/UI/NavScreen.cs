@@ -6,9 +6,10 @@ using UnityEngine.UI;
 
 /// <summary>
 /// NAV: graphical plot of the ship's own orbit (handoff-navigation-ui.md, roadmap item 1). The default minor
-/// mode of Navigation (UI shell rework) - NavigationMode builds this to fill its own tab body, alongside
-/// OrbitPanel pinned to that same body's bottom-right corner (the numeric readout this screen used to
-/// duplicate in its own sidebar; that duplication is gone now that Orbit is always right there). No longer a
+/// mode of Navigation (UI shell rework) - NavigationMode builds this to fill its own tab body. OrbitPanel (the
+/// ship's own orbit) and TrackOrbitPanel (the selected track's fitted orbit) are built as corner overlays
+/// INSIDE the map rect itself - bottom-right and bottom-left respectively - rather than pinned to the whole
+/// tab body, so they sit over open map space instead of behind the sidebar's own bottom controls. No longer a
 /// full-screen dim+panel overlay with its own Back button: OnShown()/Refresh() replace the old Open/Close/
 /// IsOpen toggle, and visibility is entirely NavigationMode's tab-switch, not this class's own.
 ///
@@ -45,6 +46,12 @@ public sealed class NavScreen
 
     private RectTransform _rootRect, _mapRect, _dialRect;
     private MapCanvas _map, _dial;
+    // Corner overlays living INSIDE the map rect itself (not the whole NAV tab) so they never compete with the
+    // sidebar for space: OrbitPanel (ship's own orbit) bottom-right, TrackOrbitPanel (selected track's fitted
+    // orbit) bottom-left. NavigationMode used to build OrbitPanel into the whole tab body instead, which put
+    // its bottom-right corner behind the sidebar's own bottom controls whenever both landed near the same spot.
+    private readonly OrbitPanel _orbit = new OrbitPanel();
+    private readonly TrackOrbitPanel _targetOrbit = new TrackOrbitPanel();
     private TextMeshProUGUI _notFitted, _incl;
     private TextMeshProUGUI _peLabel, _apLabel, _anLabel, _dnLabel, _shipLabel;
     private Button _zoomIn, _zoomOut, _layerCatalogue, _layerTracks;
@@ -113,6 +120,9 @@ public sealed class NavScreen
         _map.raycastTarget = true; // clickable: selecting a track here mirrors ContactsScreen's row click
         var aim = _mapRect.gameObject.AddComponent<PointerAim>();
         aim.OnClick = OnMapClicked;
+
+        _orbit.Build(_mapRect);
+        _targetOrbit.Build(_mapRect);
     }
 
     /// <summary>Selects whichever track's last-drawn marker (DrawTrackLayer's _trackHits) is nearest the
@@ -224,6 +234,8 @@ public sealed class NavScreen
         _notFitted.gameObject.SetActive(!fitted);
         _mapRect.gameObject.SetActive(fitted);
         SetSidebarActive(fitted);
+        _orbit.Refresh();
+        _targetOrbit.Refresh();
         if (!fitted)
         {
             UIKit.SetText(_notFitted, Loc.Get("ui.nav.notfitted"));

@@ -7,15 +7,13 @@ using UnityEngine.UI;
 /// longer positions or drags itself.
 ///
 /// Minor modes: NAV (default - the graphical orbit map, NavScreen) / MANOEUVERS (ManeuverPanel) / JUMP
-/// (JumpPanel) / NODES (NodePanel). OrbitPanel is NOT a minor mode of its own - it's a persistent readout
-/// pinned to the bottom-right corner of the NAV tab specifically (built into the same shared body as
-/// NavScreen, so its own bottom-right anchor resolves against that whole tab area), per the design decided
-/// for this rework: Orbit lives with the map, not across every Navigation tab.
+/// (JumpPanel) / NODES (NodePanel). OrbitPanel/TrackOrbitPanel are NOT minor modes of their own - they're
+/// persistent readouts NavScreen itself builds as corner overlays inside its own map rect, per the design
+/// decided for this rework: Orbit lives with the map, not across every Navigation tab.
 /// </summary>
 public sealed class NavigationMode
 {
     private readonly NavScreen _nav = new NavScreen();
-    private readonly OrbitPanel _orbit = new OrbitPanel();
     private readonly ManeuverPanel _maneuver = new ManeuverPanel();
     private readonly JumpPanel _jump = new JumpPanel();
     private readonly NodePanel _node = new NodePanel();
@@ -49,12 +47,9 @@ public sealed class NavigationMode
             _tabs[i] = UIKit.AddButton(tabRow, labels[i], () => SetActive(idx), 0f, 34f);
         }
 
-        // NAV tab: a shared container so OrbitPanel's own bottom-right corner anchor resolves against the
-        // whole tab area, not just whatever room NavScreen's internal map/sidebar layout happens to leave.
         RectTransform navBody = UIKit.Node("NavBody", prt);
         UIKit.Size(navBody, flexibleWidth: 1f, flexibleHeight: 1f);
         _nav.Build(navBody);
-        _orbit.Build(navBody);
 
         _bodies = new GameObject[4];
         _bodies[0] = navBody.gameObject;
@@ -82,7 +77,6 @@ public sealed class NavigationMode
     public void Refresh()
     {
         _nav.Refresh();
-        _orbit.Refresh();
         _maneuver.Refresh();
         _jump.Refresh();
         _node.Refresh();

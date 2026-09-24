@@ -18,10 +18,13 @@ content area the active major mode fills completely.
   even though it's unrelated, a tracks overview, not reactor/wake).
 - **NAVIGATION:** a new minor-tab dock, `NavigationMode`. NAV (default) / MANOEUVERS / JUMP / NODES.
   - NAV is `NavScreen`, no longer a full-screen overlay - see below.
-  - `OrbitPanel` is NOT a minor mode. It's pinned to the bottom-right corner of the NAV tab specifically
-    (built into the same shared body as `NavScreen`, so its own corner anchor resolves against the whole
-    tab area, not just whatever room NavScreen's internal map/sidebar split leaves free). This also let
-    NavScreen's own sidebar drop the primary/apsides/shape/period/true-anomaly text it used to duplicate -
+  - `OrbitPanel` is NOT a minor mode. **Update (2026-09-24):** it was originally pinned to the bottom-right
+    corner of the whole NAV tab body, which put it right behind the 340px sidebar's own bottom controls -
+    confirmed as an actual overlap once the user saw it rendered. Moved to be a corner overlay INSIDE
+    `NavScreen`'s own map rect instead (`_mapRect`), bottom-right, so it sits over open map space. A new
+    `TrackOrbitPanel` (selected track's `OrbitFit`-derived orbit, same two-knowledge-tiers rule as the
+    transfer planner - no NodeData) takes the map's bottom-left corner, freed up by the same move. This also
+    let NavScreen's own sidebar drop the primary/apsides/shape/period/true-anomaly text it used to duplicate -
     Orbit already shows all of that (and handles the hyperbolic/escape case NavScreen's block never did).
   - MANOEUVERS = `ManeuverPanel`, JUMP = `JumpPanel`, NODES = `NodePanel` - all three needed zero internal
     changes (Jump/Node already built plain content with no background/anchor of their own, from when they
@@ -56,8 +59,13 @@ content area the active major mode fills completely.
   `ContentSizeFitter`; dropped its `DraggablePanel.Attach`.
 - **`UI/AtlasPanel.cs`**: same change, was top-left anchored.
 - **`UI/OrbitPanel.cs`**: was top-left anchored to the WHOLE CANVAS; now bottom-right anchored to WHATEVER
-  PARENT it's given (`NavigationMode`'s shared NAV-tab body). Kept its own small background panel (it's
-  meant to read as a distinct floating readout box over the map, unlike the plain dock-tab panels).
+  PARENT it's given. **Update (2026-09-24):** that parent was the whole NAV-tab body (overlapped the
+  sidebar's bottom controls, confirmed by the user); now `NavScreen._mapRect` - bottom-right of the map
+  itself. Kept its own small background panel (it's meant to read as a distinct floating readout box over
+  the map, unlike the plain dock-tab panels).
+- **`UI/TrackOrbitPanel.cs`** (new, 2026-09-24): bottom-left counterpart to `OrbitPanel`, also built into
+  `NavScreen._mapRect`. Shows the selected track's fitted orbit (`OrbitFit.TryFit`) - primary, apsides,
+  eccentricity/inclination, period - blank when nothing's selected or the fit isn't good enough yet.
 - **`UI/ManeuverPanel.cs`**: dropped its own background `Image`/anchor/`ContentSizeFitter`/drag entirely,
   now matches `NodePanel`'s "just a `UIKit.Node` + `flexibleWidth`" style since it's a plain minor-tab body.
   `Build()` now returns `GameObject` (was `void`) to match the other tab-body panels' signature.
@@ -115,6 +123,8 @@ This is a much larger structural change than anything in this repo's recent sess
 Specific things worth checking first:
 - Does the sidebar actually sit flush against the left edge, full height below the status bar, at 160px?
 - Does the track strip's collapse toggle actually shrink it to just the header row?
-- Does `OrbitPanel` really land bottom-right of the NAV tab (not overlapping the existing 340px sidebar, not
-  clipped off-screen)?
+- ~~Does `OrbitPanel` really land bottom-right of the NAV tab~~ - confirmed overlapping the sidebar by the
+  user; fixed 2026-09-24 by moving both `OrbitPanel` and the new `TrackOrbitPanel` onto the map rect's own
+  corners instead. Still worth checking: do they land where expected now (bottom-right/bottom-left of the
+  MAP, not clipped, not overlapping the inclination-dial/track markers)?
 - Switching major modes and minor tabs a few times each, to catch any `SetActive` mismatch or stale label.

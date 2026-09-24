@@ -167,6 +167,7 @@ public static class Loc
 
         // Orbit
         { "ui.orbit",          "ORBIT" },
+        { "ui.orbit.target",   "TARGET ORBIT" },
         { "ui.orbit.none",     "No stable orbit." },
         { "ui.orbit.escape",   "ESCAPE trajectory from {0}" },
         { "ui.orbit.peri",     "PERI {0}   (hyperbolic)" },

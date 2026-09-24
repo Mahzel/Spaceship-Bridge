@@ -345,6 +345,10 @@ public sealed class GameState
     /// <summary>Hydrogen needed for a burn of this size (either direction).</summary>
     public float BurnCost(float dvKmS) => Mathf.Abs(dvKmS) * Probe.hydrogenPerKmS;
 
+    /// <summary>BurnCost run backwards: the total dv the CURRENT hydrogen on hand could still buy, in one
+    /// direction. Roadmap item 8's "Δv budget widget" reads this against a plan's own queued cost.</summary>
+    public float MaxDvKmS => Probe != null && Probe.hydrogenPerKmS > 1e-6f ? Hydrogen / Probe.hydrogenPerKmS : 0f;
+
     /// <summary>
     /// Discrete burn along the ship's heading (negative = retro). Spends hydrogen and changes the velocity.
     /// Returns false, changing nothing, if there is not enough hydrogen.

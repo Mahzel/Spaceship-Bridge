@@ -191,6 +191,7 @@ public static class Loc
         { "ui.node.warp.cancel",      "CANCEL WARP" },
         { "ui.node.queue",            "Node in {0}   dv {1:F2} km/s   ({2} queued)" },
         { "ui.node.queue.none",       "No node armed." },
+        { "ui.node.dvbudget",         "dv budget {0:F2} km/s   queued {1:F2} km/s   margin {2:+0.00;-0.00} km/s" },
         { "ui.node.arm.hint",         "ARM queues the hand-set burn above (set PROGRADE/NORMAL first). PLOT TRANSFER and CREATE NODES (NAV tab) queue their own burns immediately - no separate ARM needed, and ARM here would replace them." },
         { "ui.node.target",           "TARGET: {0}" },
         { "ui.node.target.none",      "TARGET: none selected" },

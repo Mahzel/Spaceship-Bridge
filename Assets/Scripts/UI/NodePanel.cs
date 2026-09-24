@@ -22,7 +22,7 @@ public sealed class NodePanel
         (30f * 86400f, "+30D"),
     };
 
-    private TextMeshProUGUI _time, _prograde, _normal, _previewLine, _previewShape, _queueLine, _target;
+    private TextMeshProUGUI _time, _prograde, _normal, _previewLine, _previewShape, _queueLine, _dvBudgetLine, _target;
     private Button[] _sizeButtons;
     private Button _warpButton;
     private TextMeshProUGUI _warpLabel;
@@ -93,6 +93,9 @@ public sealed class NodePanel
         _warpLabel = _warpButton.GetComponentInChildren<TextMeshProUGUI>();
 
         _queueLine = UIKit.AddLabel(root, "", t.fontSizeSmall, t.text);
+        UIKit.Size(_queueLine.rectTransform, minHeight: 20f);
+        _dvBudgetLine = UIKit.AddLabel(root, "", t.fontSizeSmall, t.text);
+        UIKit.Size(_dvBudgetLine.rectTransform, minHeight: 20f);
         TextMeshProUGUI armHint = UIKit.AddLabel(root, Loc.Get("ui.node.arm.hint"), t.fontSizeSmall, t.textDim);
         armHint.textWrappingMode = TextWrappingModes.Normal;
         UIKit.Size(armHint.rectTransform, preferredWidth: 380f);
@@ -197,6 +200,21 @@ public sealed class NodePanel
         else
         {
             UIKit.SetText(_queueLine, Loc.Get("ui.node.queue.none"));
+        }
+
+        // Δv budget (roadmap item 8): the whole QUEUE's cost against what the hydrogen on hand can still buy -
+        // GameState.MaxDvKmS is GameState.BurnCost run backwards, same conversion, no separate unit risk.
+        if (state != null)
+        {
+            float queuedDv = 0f;
+            if (mp != null)
+            {
+                var queue = mp.QueueForSave;
+                for (int i = 0; i < queue.Count; i++) queuedDv += queue[i].TotalDvKmS;
+            }
+            float budget = state.MaxDvKmS;
+            UIKit.SetText(_dvBudgetLine, Loc.Get("ui.node.dvbudget", budget, queuedDv, budget - queuedDv));
+            _dvBudgetLine.color = queuedDv > budget ? UITheme.Current.danger : UITheme.Current.text;
         }
 
         if (_warpLabel != null)

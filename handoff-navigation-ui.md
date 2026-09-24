@@ -679,3 +679,28 @@ NAV tab still has enough vertical room for the map's own 600px minimum height no
 (~142px fixed) also claims space in the same column - should be fine at typical window sizes but wasn't
 checked against a small one; and whether a timeline BURN row's WARP TO reliably lands the clock near the
 right event when TWO nodes are queued (departure + arrival, the common case from CREATE NODES).
+
+## Progress (this session - item 8's Δv budget widget)
+
+Kept going down the roadmap's own suggested order after item 4. Picked the Δv budget widget specifically
+over the rest of item 8 (Burn HUD, Alerts, hazard layer) and item 7 (galaxy map, blocked on an open design
+question about whether galaxy coordinates exist yet) because it's the one piece buildable from data already
+on hand with NO new unit-conversion risk - an "alerts" pass (periapsis below a body's surface, say) would
+need a body's radius converted into the same game-units frame as orbital elements, and that conversion isn't
+exercised anywhere else in the codebase yet to crib from; better to get it right later with a chance to
+verify it than guess at it now with no way to test.
+
+- **`Core/GameState.cs`** gained `MaxDvKmS`: `BurnCost` run backwards (`Hydrogen / Probe.hydrogenPerKmS`) -
+  the dv the CURRENT hydrogen on hand could still buy, in one direction. Same formula `BurnCost`/`TryBurn`
+  already use, just inverted, so there's no new conversion to get wrong.
+- **`UI/NodePanel.cs`** gained a `dv budget {A} km/s   queued {B} km/s   margin {C} km/s` line under the
+  existing queue readout: sums every queued node's `TotalDvKmS` (not just the next one - the WHOLE plan's
+  cost) and compares it to `MaxDvKmS`. Text goes `t.danger`-red when the queue would cost more than the
+  hydrogen on hand can pay for. A simple "if every queued burn fired right now" snapshot, not accounting for
+  hydrogen regenerating (reactor/solar) between now and a later burn - matches the roadmap's own plain framing
+  ("remaining Δv, minus each planned node's cost"), not a full mission-planning fuel budget.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Low risk relative to most of this
+session's other changes (one new backwards-formula property, one new UI label, no geometry/physics touched),
+but still worth a look: does the margin actually go red and stay legible against `t.panelColor` in both themes
+when a plan is over budget.

@@ -95,7 +95,7 @@ public sealed class AtlasPanel
 
         RectTransform recallRow = UIKit.Node("Recall", prt);
         UIKit.HStack(recallRow, 8f, 0).childAlignment = TextAnchor.MiddleLeft;
-        _recall = UIKit.AddButton(recallRow, Loc.Get("ui.atlas.recall"), OnRecallClicked, 220f, 30f);
+        _recall = UIKit.AddButton(recallRow, Loc.Get("ui.atlas.recall"), OnRecallClicked, 250f, 30f);
         _recallLabel = _recall.GetComponentInChildren<TextMeshProUGUI>();
         _recallFlash = UIKit.AddLabel(recallRow, "", t.fontSizeSmall, t.textDim);
 
@@ -241,6 +241,7 @@ public sealed class AtlasPanel
         _recall.gameObject.SetActive(_level == Level.Body);
         _recall.interactable = canRecall;
         UIKit.SetText(_recallLabel, Loc.Get(_recallNodeIndex >= 0 ? "ui.atlas.recall"
+                                          : _recallEntry != null && _recallEntry.hasOrbit ? "ui.atlas.recall.orbit"
                                           : _recallEntry != null ? "ui.atlas.recall.rough" : "ui.atlas.recall.none"));
         if (_flashHold > 0f) _flashHold -= Time.unscaledDeltaTime; else UIKit.SetText(_recallFlash, "");
 
@@ -467,14 +468,20 @@ public sealed class AtlasPanel
     private string BuildBody(IList<AtlasEntry> all, string systemId, string bodyName)
     {
         bool catalogued = false;
-        AtlasEntry bestFix = null; // most recent entry under this body with a usable position fix
+        // Best entry under this body to recall from: an entry with a determined orbit (AtlasEntry.hasOrbit)
+        // beats one without regardless of age (good at any future time - see GhostContact), otherwise the
+        // most recent fix wins.
+        AtlasEntry bestFix = null;
         for (int i = 0; i < all.Count; i++)
         {
             AtlasEntry e = all[i];
             if (e.systemId != systemId || e.bodyName != bodyName) continue;
             if (e.catalogued) { catalogued = true; continue; }
             _items.Add(EntryItem(e));
-            if (e.recordedRange.valid && (bestFix == null || e.recordedTime > bestFix.recordedTime)) bestFix = e;
+            if (!e.recordedRange.valid) continue;
+            bool better = bestFix == null || (e.hasOrbit && !bestFix.hasOrbit)
+                       || (e.hasOrbit == bestFix.hasOrbit && e.recordedTime > bestFix.recordedTime);
+            if (better) bestFix = e;
         }
         if (_items.Count == 0) _items.Add(new Item { c0 = Loc.Get("ui.atlas.nosurvey"), dim = true });
 
@@ -486,10 +493,13 @@ public sealed class AtlasPanel
                 if (data.nodes[i].name == bodyName) { node = data.nodes[i]; nodeIndex = i; break; }
 
         // RECALL target for this body page: a catalogued body with a known orbit gets a precise recall (exact
-        // position, per GhostContact.FromCatalogued); otherwise the freshest survey fix, if any, gets a rough
-        // coasted-forward recall (GhostContact.FromEntry) - see AtlasPanel's own RECALL handler.
-        if (catalogued && node != null && node.hasOrbit) { _recallData = data; _recallNodeIndex = nodeIndex; _recallEntry = null; }
-        else if (bestFix != null) { _recallData = null; _recallNodeIndex = -1; _recallEntry = bestFix; }
+        // position, per GhostContact.FromCatalogued); otherwise the best survey fix on file, if any, gets a
+        // determined-orbit or rough coasted-forward recall (GhostContact.FromEntry) - see AtlasPanel's own
+        // RECALL handler. Only offered while the ship is actually IN this system: a bearing/range computed
+        // against the ship's current position means nothing for a body in a system it isn't in.
+        bool here = SystemManager.Current != null && SystemManager.Current.CurrentSystemID == systemId;
+        if (here && catalogued && node != null && node.hasOrbit) { _recallData = data; _recallNodeIndex = nodeIndex; _recallEntry = null; }
+        else if (here && bestFix != null) { _recallData = null; _recallNodeIndex = -1; _recallEntry = bestFix; }
         else { _recallData = null; _recallNodeIndex = -1; _recallEntry = null; }
         _recallName = ShortName(bodyName);
 

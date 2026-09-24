@@ -41,6 +41,16 @@ public sealed class DataRecord
     /// <summary>Declared confidence (Data panel toggle). A transmission freezes the value it had when sent.</summary>
     public Confidence confidence = Confidence.Tentative;
 
+    /// <summary>The orbit OrbitFit.TryFit could determine off this contact as of the record's last update
+    /// (raw recordings only - see DataStore.OnSensorLine; a stub never runs long enough to be worth it), and
+    /// the name of the body it's relative to. Never a catalogue/NodeData lookup, same rule as everywhere else
+    /// this session: only what the track itself measured. Carried into the Atlas on delivery (Atlas.Log) so a
+    /// later RECALL can predict the contact's position at ANY future time from real orbital mechanics instead
+    /// of a straight-line coast that only stays honest for a short while.</summary>
+    public bool hasOrbit;
+    public OrbitElements orbit;
+    public string orbitPrimaryName;
+
     /// <summary>Worst (lowest) Track.quality observed while this record was captured — running minimum from
     /// creation through every refresh/growth tick. Used by Atlas to weight the odds a delivered record turns
     /// out to be a false entry: data logged off a rock-solid confirmed track should almost never be wrong,
@@ -232,6 +242,14 @@ public sealed class DataStore
             r.endTime = simTime;
             if (r.bodyName == null) r.bodyName = BodyNameOf(tr, r.catalogueName); // identified mid-recording
             r.sourceQuality = Math.Min(r.sourceQuality, tr.quality);
+            // Sharpens for free as the recording runs (OrbitFit's own doc comment: re-reads whatever the
+            // tracker's current best range is, no separate fitting pass) - keep whatever the latest line saw.
+            if (OrbitFit.TryFit(tr, out OrbitElements fitEl, out string fitPrimary))
+            {
+                r.hasOrbit = true;
+                r.orbit = fitEl;
+                r.orbitPrimaryName = fitPrimary;
+            }
             changed = true;
 
             if (full) { r.recording = false; r.stopReason = "full"; }

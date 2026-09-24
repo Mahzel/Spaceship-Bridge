@@ -341,6 +341,7 @@ public static class Loc
         { "ui.atlas.notsurveyed", "not surveyed" },
         { "ui.atlas.nosurvey",    "No survey data of our own yet." },
         { "ui.atlas.recall",       "RECALL (known orbit)" },
+        { "ui.atlas.recall.orbit","RECALL (determined orbit)" },
         { "ui.atlas.recall.rough","RECALL (rough, aged fix)" },
         { "ui.atlas.recall.none", "RECALL (no fix on file)" },
         { "ui.atlas.recall.done", "{0} seeded - check TRACKS / NAV / a sensor's SEL." },

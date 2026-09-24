@@ -60,6 +60,14 @@ public sealed class AtlasEntry
     /// there"), never anything omniscient: exactly the estimate (uncertainty included) the record already had.</summary>
     public float recordedBearing;
     public RangeEstimate recordedRange;
+
+    /// <summary>The orbit OrbitFit.TryFit had determined as of the source record's last update (raw
+    /// recordings only - see DataRecord's own doc comment; a stub never carries one), and the body it's
+    /// relative to. GhostContact.FromEntry prefers this over recordedRange's straight-line coast when it's
+    /// set: a real orbit stays honest at any future time, not just briefly after the fix.</summary>
+    public bool hasOrbit;
+    public OrbitElements orbit;
+    public string orbitPrimaryName;
 }
 
 /// <summary>
@@ -123,6 +131,7 @@ public sealed class Atlas
             // actually knew last, not an average of every sighting this run.
             existing.recordedBearing = r.bearing;
             existing.recordedRange = r.range;
+            if (r.hasOrbit) { existing.hasOrbit = true; existing.orbit = r.orbit; existing.orbitPrimaryName = r.orbitPrimaryName; }
             if (Changed != null) Changed();
             return existing;
         }
@@ -140,6 +149,9 @@ public sealed class Atlas
         e.bodyName = r.bodyName;
         e.recordedBearing = r.bearing;
         e.recordedRange = r.range;
+        e.hasOrbit = r.hasOrbit;
+        e.orbit = r.orbit;
+        e.orbitPrimaryName = r.orbitPrimaryName;
 
         float falseChance = Mathf.Clamp01(0.85f * (1f - Mathf.Clamp01(r.sourceQuality)));
         double roll = Transmitter.Roll(worldSeed, runNumber, r.id, -1, -1);

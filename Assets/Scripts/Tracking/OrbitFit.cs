@@ -25,9 +25,16 @@ public static class OrbitFit
 {
     /// <summary>True with `elements` filled in if the track's current range estimate is good enough to
     /// convert into an orbit (RangeEstimate.Observable). Cheap - reuses tr.range, no new fitting work.</summary>
-    public static bool TryFit(Track tr, out OrbitElements elements)
+    public static bool TryFit(Track tr, out OrbitElements elements) => TryFit(tr, out elements, out _);
+
+    /// <summary>Same as TryFit(Track, out OrbitElements), but also names the primary the elements are relative
+    /// to (NodeData.name, the same stable identifier AtlasPanel/GetSystem already look bodies up by) - callers
+    /// that persist the fit (Atlas records) need this to place the orbit again later, since a raw OrbitElements
+    /// on its own doesn't say what it's centred on.</summary>
+    public static bool TryFit(Track tr, out OrbitElements elements, out string primaryName)
     {
         elements = default;
+        primaryName = null;
         if (tr == null || !tr.range.Observable) return false;
 
         ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
@@ -51,6 +58,7 @@ public static class OrbitFit
         if (el.orbitalPeriod <= 0.0) return false; // degenerate fit (purely radial, or invalid input)
 
         elements = el;
+        primaryName = sm.CurrentData.nodes[orbit.PrimaryIndex].name;
         return true;
     }
 }

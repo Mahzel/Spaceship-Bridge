@@ -533,3 +533,44 @@ confirming a RECALLed catalogued body's seeded range-rate actually reads sane in
 in-Editor look: does a waterfall CORRECT on a track with an existing radar fix/identity visibly keep them (no
 more red-flash-back-to-searching-with-nothing), and does ranging a track with radar now visibly tighten
 (not distort) NAV's TARGET ORBIT panel compared to before.
+
+## Progress (this session - Atlas records carry the determined orbit, not just a bearing/range)
+
+Per the user: raw survey data should also carry whatever orbit `OrbitFit` managed to determine while it was
+being captured, so a later RECALL can predict a body's position at ANY future time from real orbital
+mechanics, not just a straight-line coast that only stays honest briefly. Stubs deliberately don't get this
+(too short-lived to be worth it) - and structurally can't, since the hook only runs on an active raw recording.
+
+- **`OrbitFit.TryFit` gained an overload** that also outputs the primary's name (`NodeData.name`, the same
+  stable identifier `AtlasPanel`/`GetSystem` already look bodies up by) - a raw `OrbitElements` on its own
+  doesn't say what it's centred on, and a caller that PERSISTS the fit (unlike NavScreen/NodePanel, which use
+  it immediately against the ship's current primary) needs to remember that too. The original single-out
+  overload is now a thin wrapper; none of its four existing call sites changed.
+- **`DataRecord` and `AtlasEntry` both gained `hasOrbit`/`orbit`/`orbitPrimaryName`.** `DataStore.OnSensorLine`
+  (runs per waterfall line for an active RAW recording only - never a stub) calls the new `TryFit` overload
+  every line and keeps whichever fit last succeeded - it sharpens for free the same way `OrbitFit` already
+  does, per its own doc comment. `Atlas.Log()` carries it into the delivered entry on both the new-entry and
+  merge paths; on merge, an orbit is only ever REPLACED by a newer one, never cleared by a later record that
+  didn't happen to have one (unlike `recordedBearing`/`recordedRange`, which always take the freshest
+  regardless - an orbit fit is rarer and more valuable, so a merge shouldn't downgrade it).
+- **`GhostContact.FromEntry` now prefers the determined orbit when there is one** (`FromEntryOrbit`, new
+  private method): propagates `AtlasEntry.orbit` to now with `KeplerOrbit.StateAt` relative to
+  `orbitPrimaryName`'s CURRENT position (`OrbitalMechanics.NodeState`, looked up by name in the CURRENT
+  system) - the exact same mechanism `FromCatalogued` already used, just off a fitted orbit instead of a
+  known-true one, so it gets a small nonzero sigma (2%) instead of the catalogued case's near-zero (0.1%).
+  Falls back to the old straight-line coast (`FromEntryCoast`, renamed from the previous `FromEntry` body)
+  when there's no orbit on file, or the named primary isn't in the current system at all.
+- **New guard, found while wiring this up:** `AtlasPanel.BuildBody` now only offers RECALL (any of the three
+  kinds) while the ship is actually IN the entry's own system (`SystemManager.Current.CurrentSystemID`) - a
+  bearing/range computed against the ship's CURRENT position means nothing for a body in a system the ship
+  isn't in. This was already a real gap in last session's RECALL work (both the catalogued and coast paths
+  used the ship's live position unconditionally); worth calling out since it wasn't caught at the time.
+- `AtlasPanel`'s RECALL button now shows three tiers: `RECALL (known orbit)` (catalogued), `RECALL
+  (determined orbit)` (a survey entry with `hasOrbit`), `RECALL (rough, aged fix)` (coast-only), `RECALL (no
+  fix on file)` (disabled). `BuildBody`'s own `bestFix` selection now prefers ANY orbit-bearing entry over a
+  fresher one without, before falling back to "most recent" as the tiebreaker.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Worth an in-Editor look specifically at:
+a long raw recording's RECALL eventually offering "determined orbit" instead of "rough, aged fix" once
+`OrbitFit` converges; and that an orbit-based recall's predicted bearing actually tracks a body correctly
+across a real time skip (warp forward, then RECALL again and see if the new prediction still points at it).

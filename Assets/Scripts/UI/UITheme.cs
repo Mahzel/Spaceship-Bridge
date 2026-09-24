@@ -54,6 +54,7 @@ public class UITheme : ScriptableObject
     public Color navBody   = new Color(0.85f, 0.85f, 0.60f, 1f); // primary marker
     public Color navNode   = new Color(1.00f, 0.85f, 0.30f, 1f); // Pe/Ap markers
     public Color navPlane  = new Color(0.55f, 0.70f, 1.00f, 1f); // AN/DN reference-plane crossings
+    public Color navCatalogue = new Color(0.85f, 0.85f, 0.60f, 0.55f); // catalogued-body orbits - dim, not the ship's own exact conic
 
     [Header("Buttons")]
     public Color buttonNormal  = new Color(0.06f, 0.14f, 0.08f, 1f);

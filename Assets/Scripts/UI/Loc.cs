@@ -203,6 +203,8 @@ public static class Loc
         { "ui.nav.label.an",     "AN" },
         { "ui.nav.label.dn",     "DN" },
         { "ui.nav.label.ship",   "SHIP" },
+        { "ui.nav.layer.catalogue", "CATALOGUE" },
+        { "ui.nav.layer.tracks",    "TRACKS" },
 
         // Maneuver
         { "ui.maneuver",  "MANEUVER" },

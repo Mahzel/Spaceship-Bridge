@@ -215,6 +215,60 @@ the Console before relying on any of this.
 - `NavScreen.Draw()`'s `AutoFit` reads `_mapRect.rect` right after a forced layout rebuild on open; should be
   correct but hasn't been visually confirmed given the compile-check gap above.
 
-**Next up, per the "Suggested order" above:** item 2 (catalogue/track layers) is the natural next step - it
-reuses `Core/Catalogue.cs` and `Tracking/TrackManager.cs` (already confirmed to store `shipX/shipZ` per sample,
-which item 6's triangulation will need) and slots into the same `MapCanvas` this session built.
+## Progress (this session - item 2: catalogue and track layers)
+
+Read-only, toggle-able layers added on top of item 1's own-ship plot, both gated by the same `HasSystemView`
+tier (no new hardware requirement):
+
+- **`Physics/KeplerOrbit.cs`**: refactored the perifocal->world rotation out of `OffsetAt` into a shared
+  `Rotate` helper, and added `OffsetAtTrueAnomaly(in OrbitElements, double nu)` - the `OrbitElements` analogue
+  of `ShipOrbit.OffsetAtTrueAnomaly`, so a catalogued body's whole ellipse can be traced by anomaly (matching
+  the ship's own sampling) instead of walking simulated time.
+- **`Core/Catalogue.cs`**: `CollectOrbitsAroundPrimary(primaryIndex, result)` - the catalogue layer's only data
+  source. Returns catalogued bodies (`Atlas.FindCatalogued`) of the CURRENT system whose `NodeData.parent`
+  equals the ship's current primary index, each with its `OrbitElements` (already relative to that same
+  primary, so no frame conversion is needed) and radius. Reads only the Atlas + the generated `SystemData` -
+  never `SensorSight` or a live `CelestialBody`, per the roadmap's hard rule. Restricting to "same parent as
+  ship's primary" is deliberate: it's exactly the set the map can draw in the same frame as the ship's own
+  conic, and it naturally becomes "the planets" when the primary is the star and "the moons" when the primary
+  is a planet, without any extra frame-walking code.
+- **`UI/NavScreen.cs`**: two new draw passes, `DrawCatalogueLayer` and `DrawTrackLayer`, plus a "CATALOGUE" /
+  "TRACKS" toggle button pair in the sidebar (`UIKit.SetButtonActive` highlight, same convention as other
+  screens' selected-option buttons). Labels are pooled (`_catalogueLabels`/`_trackLabels`, grown to the
+  largest count seen, hidden rather than destroyed when the count shrinks) since these layers have a variable
+  number of entries, unlike item 1's fixed Pe/Ap/AN/DN/ship labels.
+  - **Catalogue layer**: dim ellipse (`UITheme.navCatalogue`, new colour, added to both the C# default and
+    `Resources/UITheme.asset`) sampled the same way as the ship's own conic, plus a small dot at the body's
+    actual position now (`KeplerOrbit.OffsetAt`) and a name label.
+  - **Track layer**: colour follows `UITheme.WaterfallTrackColor` (searching/locked/selected), same as the
+    waterfall and Track panel. A track with an observable range (`TrackManager`'s TMA/radar fusion,
+    `tr.range.Observable`) draws as a dot - its `RangeEstimate.x/z` are in the SYSTEM frame (ship-relative,
+    per `ApplyRadarFix`), so they're re-based onto the primary via `SystemData.PositionOf(primaryIndex, now)`
+    before going through the same `toScreen` the rest of the map uses - plus a short 1-sigma tick along the
+    bearing line. A track with no observable range (bearing-only, or ranged but not locked) draws as a dashed
+    ray from the ship's own screen position along its measured bearing, a fixed `BearingRayPx` (160px) long -
+    a real "ray to infinity with a fading tail" per the design doc, not implemented (no gradient alpha in
+    `MapCanvas` yet; flagged below).
+
+**Not compile-checked** (same batchmode/license-lock issue as item 1's session - see that note above; nothing
+about this pass should have removed the blocker). Open the project and check the Console before relying on it.
+
+**Known gaps / rough edges to fix on first look:**
+- Bearing-only ray has no "fading tail" - it's one dashed colour end to end. `MapCanvas` would need a
+  per-vertex alpha gradient (or several shorter fading dashed segments) to do this properly.
+- No sensor-cone overlay yet (imager FOV, waterfall fan, radar sweep, spectrometer slit) - still open from the
+  roadmap's item 2 scope.
+- Tracks are not reset/reacquired on `TrackManager.Generation` change (system jump) in any special way here -
+  worth confirming the pooled labels don't show stale entries for one frame right after a jump (should self
+  correct next redraw tick since `DrawTrackLayer` rebuilds fully every call, but not visually confirmed).
+- Track/catalogue label overlap: same "no declutter yet" gap item 1 already flagged for Pe/Ap/AN/DN, now
+  worse with an unbounded number of tracks/bodies - still deferred, per the roadmap.
+- Catalogue layer only draws bodies sharing the ship's current primary; a body one level up or down (e.g. a
+  moon of a DIFFERENT planet than the one the ship orbits) is invisible until the ship's primary changes. This
+  matches "system view" scope on purpose (see above) but is worth restating if it looks like a bug.
+
+**Next up, per the "Suggested order" above:** item 3 (node placement and predicted path) is the natural next
+step - the map core, the ship's own conic and now the catalogue/track layers are all in place for a target to
+click against. Item 4 (timeline strip) depends on it. The sensor-cone overlay (still open from item 2's own
+scope) could also be picked up first if preferred, since it's a smaller, independent addition to
+`DrawTrackLayer`'s sibling passes.

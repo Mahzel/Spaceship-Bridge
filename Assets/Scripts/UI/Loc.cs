@@ -65,7 +65,7 @@ public static class Loc
         { "ui.aim.tilt.value",     "{0:+0.0;-0.0}deg fan +/-{1:0}" },
         { "ui.aim.cursor",         "CUR {0:000.0}" },
         { "ui.aim.mark",           "MARK" },
-        { "ui.aim.move",           "MOVE" },
+        { "ui.aim.move",           "CORRECT" },
         { "ui.wf.zoom",            "ZOOM" },
         { "ui.wf.zoom.value",      "x{0:0}  ({1:0.#}deg)" },
         { "ui.wf.center",          "CTR" },
@@ -159,7 +159,7 @@ public static class Loc
         { "ui.track.drop",     "x" },
         { "ui.track.nextname",     "NEXT" },
         { "ui.track.nextnamehint", "name" },
-        { "ui.track.markhint",     "click waterfall: mark, or move selected" },
+        { "ui.track.markhint",     "click waterfall: mark, or correct selected" },
         { "ui.heading.tick",       "HDG" },
 
         { "ui.track.range",    "R {0} +/-{1:F0}%" },

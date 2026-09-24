@@ -286,30 +286,28 @@ public sealed class TrackManager
     }
 
     /// <summary>
-    /// Moves an existing track to a new bearing (the player re-marking it), keeping its id and name. Everything
-    /// measured at the old bearing is thrown away: history, rate, range, elevation, identity. It starts searching
-    /// again, exactly like a fresh mark.
+    /// Corrects an EXISTING track's bearing (the player re-marking it on the waterfall/DSP) as a new sample
+    /// folded into its continuing history - NOT a fresh contact. Everything already known (range, elevation,
+    /// radar fix, rate, identity) is kept: this goes through the exact same ApplyHit path a real detection
+    /// does, so a correction participates in quality/rate/TMA like any other hit rather than wiping them. A
+    /// correction built on bad data just becomes one noisy sample among the others the history-weighted rate
+    /// fit and TMA already wash out over time - it doesn't get to overrule everything at once, on purpose. If
+    /// corrections keep disagreeing badly (a genuinely different contact, or the player got it wrong), Drop +
+    /// mark fresh is still the escape hatch, same as it always was.
     /// </summary>
-    public bool Retarget(int id, double time, float worldBearingDeg)
+    public bool CorrectBearing(int id, double time, float worldBearingDeg, float sigmaDeg,
+                               double shipX, double shipZ, float headingDeg)
     {
         Track tr = Find(id);
         if (tr == null) return false;
-        tr.status = TrackStatus.Tentative;
-        tr.bearing = BearingMath.Wrap360(worldBearingDeg);
-        tr.lastTime = time;
-        tr.lastSnr = 0f; tr.snrAvg = 0f; tr.lostLock = false;
-        tr.hasRate = false; tr.rateDegPerDay = 0f; tr.rateSigmaDegPerDay = float.PositiveInfinity;
-        tr.quality = 0.1f;
-        tr.hits = tr.misses = tr.consecutiveMisses = tr.updates = 0;
-        tr.history.Clear();
-        tr.range = default(RangeEstimate);
-        tr.tmaRange = default(RangeEstimate);
-        tr.radarFix = default(RangeEstimate);
-        tr.radarFixTime = 0; tr.radarRangeRateKmS = 0; tr.hasRadarRate = false;
-        tr.hasElevation = false; tr.elevationSigmaDeg = 0f; tr.elevationSource = ElevationSource.None;
-        tr.angularRadiusDeg = 0f;
-        tr.supportHoldUntil = 0; tr.lastSupport = ElevationSource.None;
-        tr.info.Reset();
+        var d = new Detection
+        {
+            time = time,
+            bearing = BearingMath.Wrap360(worldBearingDeg),
+            snr = Math.Max(tr.lastSnr, 1f), // a deliberate mark reads as at least a threshold-strength hit
+            sigmaDeg = Math.Max(sigmaDeg, 0.02f),
+        };
+        ApplyHit(tr, d, time, shipX, shipZ, headingDeg);
         if (Changed != null) Changed();
         return true;
     }
@@ -509,9 +507,26 @@ public sealed class TrackManager
         re.range = rangeUnits;
         re.rangeSigma = Math.Max(sigmaUnits, 1e-6);
         double b = bearingDeg * Math.PI / 180.0;
+        double sinB = Math.Sin(b), cosB = Math.Cos(b);
         re.x = shipX + rangeUnits * Math.Sin(b);
         re.z = shipZ + rangeUnits * Math.Cos(b);
         re.samples = tr.tmaRange.samples;
+
+        // Feeds the orbit solver, not just the range readout: OrbitFit.TryFit converts whatever tr.range
+        // (BestRange) currently is into a state vector, position AND velocity - a radar fix with no velocity
+        // here used to hand it a wrong "not moving relative to the primary" guess whenever BestRange picked
+        // the radar fix over TMA (tighter sigma), silently producing a badly wrong orbit even off a good ping.
+        // A TRACK-mode ping's own hasRate measures only the RADIAL (line-of-sight) component - real, but
+        // half the story - so the TANGENTIAL component still has to come from TMA's own bearing-history fit
+        // when one exists; only the along-LOS part gets replaced with radar's own (near-exact) reading.
+        if (hasRate)
+        {
+            double tmaVx = tr.tmaRange.valid ? tr.tmaRange.vxKmS : 0.0;
+            double tmaVz = tr.tmaRange.valid ? tr.tmaRange.vzKmS : 0.0;
+            double tmaRadial = tmaVx * sinB + tmaVz * cosB; // TMA's own along-LOS component, to be replaced
+            re.vxKmS = tmaVx + (rangeRateKmS - tmaRadial) * sinB;
+            re.vzKmS = tmaVz + (rangeRateKmS - tmaRadial) * cosB;
+        }
 
         tr.radarFix = re;
         tr.radarFixTime = time;
@@ -534,6 +549,11 @@ public sealed class TrackManager
         {
             double unitsPerSec = tr.radarRangeRateKmS / ShipState.KmPerUnit;
             f.range = Math.Max(1e-6, f.range + unitsPerSec * ageSec);
+            // x/z must age forward with the same fix, not just range: OrbitFit reads this as "position now",
+            // and a stale (x, z) paired with an aged range used to describe two different times at once.
+            double kmPerUnit = ShipState.KmPerUnit;
+            f.x += f.vxKmS / kmPerUnit * ageSec;
+            f.z += f.vzKmS / kmPerUnit * ageSec;
         }
         f.rangeSigma += f.range * RadarFixAgeFractionPerDay * ageDays;
         return f;

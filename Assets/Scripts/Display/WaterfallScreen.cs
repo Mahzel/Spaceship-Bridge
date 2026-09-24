@@ -15,8 +15,11 @@ using UnityEngine.UI;
 /// the TILT -/+ steppers, the Up/Down arrows, or by dragging the waterfall image vertically. X is a bearing
 /// CURSOR, not a steer: Left/Right arrows move it, Enter or MARK seeds a track there. Clicking the image or
 /// the DSP strip marks a bearing directly (and moves the cursor there). Shift makes keys fine.
-/// With a track SELECTED, marking MOVES that track to the new bearing instead of creating one (the button
-/// reads MOVE); deselect it (click its button in the Track panel again) to create new tracks.
+/// With a track SELECTED, marking CORRECTS that track's bearing instead of creating one (the button reads
+/// CORRECT): a new sample folded into its continuing history via TrackManager.CorrectBearing, keeping
+/// everything already known (range, elevation, radar fix, rate, identity) rather than wiping it - a bad
+/// correction just becomes one noisy sample the history-weighted fits wash out, not a full reset. Deselect
+/// the track (click its button in the Track panel again) to create new tracks instead.
 ///
 /// Zoom (display only, WaterfallView): ZOOM -/+ or the mouse wheel over the image magnify a slice of the
 /// circle (x1..x32); processing stays full-circle. Drag the image sideways to pan while zoomed; CTR centres
@@ -279,7 +282,15 @@ public sealed class WaterfallScreen
         if (Game.State == null || p == null) return;
         double time = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
         TrackManager tm = Game.State.Tracks;
-        if (tm.Find(tm.SelectedId) != null) tm.Retarget(tm.SelectedId, time, bearing);
+        Track selected = tm.Find(tm.SelectedId);
+        if (selected != null)
+        {
+            // Same sigma a real threshold-strength detection would carry (Detector's own formula) - a
+            // deliberate click reads as about that confident, not perfectly exact.
+            float sigmaDeg = Mathf.Max(0.02f, 0.5f * p.spec.BeamwidthDeg / Mathf.Max(p.spec.detectionThresholdSigma, 1f));
+            ShipState s = Game.State.Ship;
+            tm.CorrectBearing(selected.id, time, bearing, sigmaDeg, s.x, s.z, (float)s.headingDeg);
+        }
         else tm.MarkBearing(time, bearing, p.spec.maxTracks);
     }
 

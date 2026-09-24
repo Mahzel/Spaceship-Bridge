@@ -499,3 +499,37 @@ km/s against that same sim-second clock (per `ManeuverPlan.Execute`, burns add s
 rate scaling) - the conversion there is spatial-only (`* ShipState.KmPerUnit`), mirroring exactly how
 `OrbitFit.TryFit` already converts `RangeEstimate.vxKmS`/`.vzKmS` the other way (`/ KmPerUnit`). Worth
 confirming a RECALLed catalogued body's seeded range-rate actually reads sane in the UI before trusting it.
+
+## Progress (this session - waterfall corrections keep history, radar velocity feeds the orbit solver)
+
+- **Waterfall CORRECT keeps history:** `WaterfallScreen`'s click-to-mark, when a track is SELECTED, used to
+  call `TrackManager.Retarget` - which wiped everything (history, rate, range, elevation, radar fix, identity)
+  and started the track over as freshly Tentative. Per the user: a bearing correction on an existing contact
+  should be a CORRECTION, not a new contact - prior sensor work (radar ranges, spectrometry, imager fixes,
+  the fitted rate) shouldn't evaporate every time the player nudges the bearing. `Retarget` is gone, replaced
+  by `TrackManager.CorrectBearing`, which builds a synthetic `Detection` from the click and runs it through
+  the SAME `ApplyHit` path a real waterfall/imager/radar detection uses - the correction becomes one more
+  weighted sample in the track's continuing history (feeding TMA/the rate fit exactly like a real hit would),
+  not a wholesale reset. A correction built on bad data just becomes noise the history-weighted fits wash out
+  over time, same principle the user described; Drop + mark fresh is still there if it never converges. The
+  button/hint text changed MOVE -> CORRECT to say what it now actually does.
+
+- **Radar velocity into the orbit solver:** `OrbitFit.TryFit` converts whatever `tr.range` (`BestRange`)
+  currently is into a full state vector - position AND velocity - for `StateToElements`. `ApplyRadarFix` was
+  never filling in the radar fix's own `vxKmS`/`vzKmS` at all (always 0,0), so whenever `BestRange` picked the
+  radar fix over TMA (tighter sigma, which a good ping usually is), OrbitFit silently got handed "not moving
+  relative to the primary" - a badly wrong velocity for anything actually orbiting something, discarding all
+  of radar's own precision instead of using it. This is very likely part of why the earlier "last manoeuvre
+  sent me orbiting the sun" report happened, not just a missing feature.
+  - Fixed: a TRACK-mode ping's own `hasRate` (radial/line-of-sight Doppler, near-exact) now replaces the
+    along-LOS component of whatever velocity TMA's own bearing-history fit already had (if any) - radar can't
+    measure the TANGENTIAL component at all, so that part still has to come from TMA when it exists; with no
+    TMA velocity on file yet, the fix is radial-only (still strictly better than zero).
+  - Also fixed a related bug in `AgedRadarFix`: it already aged `range` forward using the measured range rate,
+    but left `x`/`z` pinned at fire time - a stale position paired with an aged range described two different
+    moments at once. Now `x`/`z` age forward too, using the (now-populated) velocity.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Both changes are worth a specific
+in-Editor look: does a waterfall CORRECT on a track with an existing radar fix/identity visibly keep them (no
+more red-flash-back-to-searching-with-nothing), and does ranging a track with radar now visibly tighten
+(not distort) NAV's TARGET ORBIT panel compared to before.

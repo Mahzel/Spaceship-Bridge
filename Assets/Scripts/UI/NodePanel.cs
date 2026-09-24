@@ -27,6 +27,7 @@ public sealed class NodePanel
 
     private int _sizeIndex = 1;
     private double _offsetSeconds;
+    private bool _timeChosen; // has the player touched the time row (a preset, or NOW) since the last Arm/Clear?
     private float _progradeKmS, _normalKmS;
 
     public GameObject Build(Transform parent)
@@ -48,9 +49,9 @@ public sealed class NodePanel
         for (int i = 0; i < TimePresets.Length; i++)
         {
             float add = TimePresets[i].mult;
-            UIKit.AddButton(timeRow, TimePresets[i].label, () => _offsetSeconds += add, 0f, 34f);
+            UIKit.AddButton(timeRow, TimePresets[i].label, () => { _offsetSeconds += add; _timeChosen = true; }, 0f, 34f);
         }
-        UIKit.AddButton(timeRow, Loc.Get("ui.node.now"), () => _offsetSeconds = 0.0, 0f, 34f);
+        UIKit.AddButton(timeRow, Loc.Get("ui.node.now"), () => { _offsetSeconds = 0.0; _timeChosen = true; }, 0f, 34f);
 
         // --- Burn size selector (mirrors ManeuverPanel) -----------------------
         UIKit.AddLabel(root, Loc.Get("ui.burnsize"), t.fontSizeSmall, t.textDim);
@@ -99,9 +100,18 @@ public sealed class NodePanel
         return root.gameObject;
     }
 
+    /// <summary>
+    /// The time row defaults to (and NOW resets to) an offset of 0 - "right now". ManeuverPlan.Tick() fires
+    /// any node whose time is already <= the current sim time on the very next real frame, so arming at an
+    /// untouched 0 offset used to burn (and pop) the node before the player ever saw it queued or could reach
+    /// WARP TO NODE - it just vanished, taking the warp button's interactability with it. Only an offset the
+    /// player picked ON PURPOSE (a +preset, or an explicit NOW click) may still be 0; an untouched panel gets
+    /// bumped to the first preset instead of silently instant-firing.
+    /// </summary>
     private void Arm()
     {
         if (Game.State == null || Game.Clock == null) return;
+        if (!_timeChosen) _offsetSeconds = TimePresets[0].mult;
         double when = Game.Clock.SimSeconds + _offsetSeconds;
         Game.State.Maneuver.SetSingle(when, _progradeKmS, _normalKmS);
     }
@@ -112,6 +122,7 @@ public sealed class NodePanel
         _progradeKmS = 0f;
         _normalKmS = 0f;
         _offsetSeconds = 0.0;
+        _timeChosen = false;
     }
 
     private void ToggleWarp()

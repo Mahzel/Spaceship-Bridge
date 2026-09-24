@@ -13,8 +13,13 @@ using UnityEngine.UI;
 /// crossings (AN/DN) and a live true-anomaly marker. Catalogue and track layers (roadmap item 2) are drawn on
 /// top, toggle-able, and never touch SensorSight or a live CelestialBody - catalogue orbits come from
 /// Catalogue.CollectOrbitsAroundPrimary (the generated SystemData elements), tracks from TrackManager's own
-/// bearing/range estimates. The maneuver planner overlay, the timeline and the galaxy map are later items on
-/// the same roadmap and are NOT drawn here yet.
+/// bearing/range estimates. Clicking a track here selects it exactly like SystemScreen's row click (Track
+/// panel, radar TRACK mode and Game.State.TargetBodyName all follow). The sidebar's TRANSFER section
+/// (roadmap item 5) previews and arms a Hohmann transfer to that target: phase angle now vs. the next window,
+/// wait time, Δv and time of flight (ManeuverPlan.ComputeTransferWindow), then CREATE NODES arms the same
+/// two-burn plan NodePanel's "plot a transfer" does (ManeuverPlan.SolveHohmann) but timed to the window
+/// instead of firing from right now. Node placement on the map itself, the predicted-path overlay, the
+/// timeline and the galaxy map are later items on the same roadmap and are NOT drawn here yet.
 ///
 /// Top-down (world X, Z - see KeplerOrbit's rotation: Y is the out-of-plane axis, so a pure XZ projection is
 /// exactly the ecliptic view every other screen already uses). Inclination doesn't show as tilt in a top-down
@@ -28,6 +33,7 @@ public sealed class NavScreen
     private const float ZoomStep = 1.4f;
     private const float MinPxPerAu = 0.01f, MaxPxPerAu = 200000f;
     private const float BearingRayPx = 160f; // length of a bearing-only track's ray, screen pixels
+    private const float TrackClickRadiusPx = 14f; // how close a click must land on a track's marker to select it
 
     private GameObject _root;
     private RectTransform _panelRect, _mapRect, _dialRect;
@@ -41,6 +47,13 @@ public sealed class NavScreen
     private readonly List<TextMeshProUGUI> _catalogueLabels = new List<TextMeshProUGUI>();
     private readonly List<TextMeshProUGUI> _trackLabels = new List<TextMeshProUGUI>();
     private readonly List<Catalogue.CataloguedOrbit> _catalogueScratch = new List<Catalogue.CataloguedOrbit>();
+    // Screen position of every track drawn this redraw, for click-to-select (DrawTrackLayer fills it, OnMapClicked reads it).
+    private readonly List<(int id, Vector2 pos)> _trackHits = new List<(int, Vector2)>();
+
+    // Transfer helper (roadmap item 5): reads Game.State.TargetBodyName, the same target SystemScreen sets
+    // when the player selects an identified track there (or a track clicked directly on this map).
+    private TextMeshProUGUI _transferHeader, _transferTarget, _transferPhase, _transferWindow, _transferDv;
+    private Button _transferButton;
 
     private bool _open;
     private float _pixelsPerAu = 40f;
@@ -95,6 +108,30 @@ public sealed class NavScreen
         _mapRect = UIKit.Node("Map", parent);
         UIKit.Size(_mapRect, flexibleWidth: 1f, minHeight: 600f);
         _map = _mapRect.gameObject.AddComponent<MapCanvas>();
+        _map.raycastTarget = true; // clickable: selecting a track here mirrors SystemScreen's row click
+        var aim = _mapRect.gameObject.AddComponent<PointerAim>();
+        aim.OnClick = OnMapClicked;
+    }
+
+    /// <summary>Selects whichever track's last-drawn marker (DrawTrackLayer's _trackHits) is nearest the
+    /// click, within TrackClickRadiusPx - same effect as SystemScreen.Select(), so the Track panel, radar
+    /// TRACK mode and the transfer target all follow a click here exactly as they follow one there.</summary>
+    private void OnMapClicked(Vector2 local, RectTransform rt)
+    {
+        if (Game.State == null) return;
+        int bestId = 0;
+        float bestDist = TrackClickRadiusPx;
+        for (int i = 0; i < _trackHits.Count; i++)
+        {
+            float d = Vector2.Distance(local, _trackHits[i].pos);
+            if (d < bestDist) { bestDist = d; bestId = _trackHits[i].id; }
+        }
+        if (bestId == 0) return;
+
+        TrackManager tm = Game.State.Tracks;
+        tm.SelectedId = bestId;
+        Track tr = tm.Find(bestId);
+        Game.State.SetTarget(tr != null && tr.info.identified ? tr.info.catalogName : null);
     }
 
     private void BuildSidebar(Transform parent, UITheme t)
@@ -129,6 +166,14 @@ public sealed class NavScreen
         _layerTracks    = UIKit.AddButton(layerRow, Loc.Get("ui.nav.layer.tracks"),    ToggleTracks,    0f, 34f);
         UIKit.SetButtonActive(_layerCatalogue, _showCatalogue);
         UIKit.SetButtonActive(_layerTracks, _showTracks);
+
+        UIKit.AddSpacer(side, 6f);
+        _transferHeader = UIKit.AddLabel(side, Loc.Get("ui.nav.transfer.header"), t.fontSizeBody, t.accent);
+        _transferTarget = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
+        _transferPhase  = UIKit.AddLabel(side, "", t.fontSizeSmall, t.textDim);
+        _transferWindow = UIKit.AddLabel(side, "", t.fontSizeSmall, t.textDim);
+        _transferDv     = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
+        _transferButton = UIKit.AddButton(side, Loc.Get("ui.nav.transfer.create"), CreateTransferNodes, 0f, 34f);
 
         // Marker labels: a fixed handful, positioned over the map each redraw. No label-declutter yet
         // (handoff item 1 note) - fine at this vertex count (primary, ship, Pe, Ap, AN, DN).
@@ -211,6 +256,12 @@ public sealed class NavScreen
         _zoomOut.gameObject.SetActive(active);
         _layerCatalogue.gameObject.SetActive(active);
         _layerTracks.gameObject.SetActive(active);
+        _transferHeader.gameObject.SetActive(active);
+        _transferTarget.gameObject.SetActive(active);
+        _transferPhase.gameObject.SetActive(active);
+        _transferWindow.gameObject.SetActive(active);
+        _transferDv.gameObject.SetActive(active);
+        _transferButton.gameObject.SetActive(active);
     }
 
     private void Zoom(float factor) => _pixelsPerAu = Mathf.Clamp(_pixelsPerAu * factor, MinPxPerAu, MaxPxPerAu);
@@ -235,12 +286,14 @@ public sealed class NavScreen
         UITheme t = UITheme.Current;
         ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
         _map.Clear();
+        RefreshTransfer();
 
         if (orbit == null || !orbit.HasTrajectory)
         {
             HideMarkerLabels();
             HideCatalogueLabels();
             HideTrackLabels();
+            _trackHits.Clear();
             UIKit.SetText(_primary, Loc.Get("ui.nav.none"));
             UIKit.SetText(_shape, ""); UIKit.SetText(_period, ""); UIKit.SetText(_nu, ""); UIKit.SetText(_incl, "");
             _map.Rebuild();
@@ -374,6 +427,7 @@ public sealed class NavScreen
     /// waterfall (UITheme.WaterfallTrackColor).</summary>
     private void DrawTrackLayer(ShipOrbit orbit, Vector2? shipScreen, Func<Vector3, Vector2> toScreen)
     {
+        _trackHits.Clear();
         if (!_showTracks || Game.State == null) { HideTrackLabels(); return; }
 
         TrackManager tm = Game.State.Tracks;
@@ -414,6 +468,7 @@ public sealed class NavScreen
 
             if (mark.HasValue)
             {
+                _trackHits.Add((tr.id, mark.Value));
                 TextMeshProUGUI label = PooledLabel(_trackLabels, shown, color);
                 UIKit.SetText(label, tr.name);
                 PlaceFree(label, mark.Value, new Vector2(6f, -6f));
@@ -497,6 +552,74 @@ public sealed class NavScreen
             _dial.AddDot(c, 4f, t.accent);
         }
         _dial.Rebuild();
+    }
+
+    /// <summary>Roadmap item 5 (transfer helper): phase angle now vs. the window, wait time, Δv and time of
+    /// flight for a Hohmann transfer to Game.State.TargetBodyName - the same target field SystemScreen sets
+    /// (and OnMapClicked above sets from a track clicked directly on this map). Read-only; CreateTransferNodes
+    /// is the only thing that commits it. Runs every redraw tick, independent of whether the ship's own orbit
+    /// has a trajectory, so the panel stays live even while that's blank.</summary>
+    private void RefreshTransfer()
+    {
+        GameState state = Game.State;
+        string targetName = state != null ? state.TargetBodyName : null;
+        if (string.IsNullOrEmpty(targetName))
+        {
+            UIKit.SetText(_transferTarget, Loc.Get("ui.nav.transfer.none"));
+            UIKit.SetText(_transferPhase, "");
+            UIKit.SetText(_transferWindow, "");
+            UIKit.SetText(_transferDv, "");
+            _transferButton.interactable = false;
+            return;
+        }
+        UIKit.SetText(_transferTarget, Loc.Get("ui.nav.transfer.target", targetName));
+
+        SystemManager sm = SystemManager.Current;
+        NodeData target = sm != null ? FindTarget(sm.CurrentData, targetName) : null;
+        double now = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
+        ManeuverPlan.TransferWindow w = target != null ? ManeuverPlan.ComputeTransferWindow(target, now) : default;
+
+        if (!w.valid)
+        {
+            UIKit.SetText(_transferPhase, Loc.Get("ui.nav.transfer.unavailable"));
+            UIKit.SetText(_transferWindow, "");
+            UIKit.SetText(_transferDv, "");
+            _transferButton.interactable = false;
+            return;
+        }
+
+        UIKit.SetText(_transferPhase, Loc.Get("ui.nav.transfer.phase", w.phaseNowDeg, w.phaseIdealDeg));
+        UIKit.SetText(_transferWindow, w.waitSeconds < 3600.0
+            ? Loc.Get("ui.nav.transfer.window.open")
+            : Loc.Get("ui.nav.transfer.window.wait", w.waitSeconds / 86400.0));
+        UIKit.SetText(_transferDv, Loc.Get("ui.nav.transfer.dv", w.departureDvKmS, w.arrivalDvKmS, w.transferTimeSeconds / 86400.0));
+        _transferButton.interactable = true;
+    }
+
+    /// <summary>Recomputes the window fresh (it may have shifted since the last redraw tick) and arms the two
+    /// burns it produces - NodePanel's own "plot a transfer" arms departure at NOW (phase-blind); this waits
+    /// for the window ComputeTransferWindow found, same ManeuverPlan.SolveHohmann underneath.</summary>
+    private void CreateTransferNodes()
+    {
+        GameState state = Game.State;
+        if (state == null || string.IsNullOrEmpty(state.TargetBodyName) || Game.Clock == null) return;
+        SystemManager sm = SystemManager.Current;
+        NodeData target = sm != null ? FindTarget(sm.CurrentData, state.TargetBodyName) : null;
+        if (target == null) return;
+
+        ManeuverPlan.TransferWindow w = ManeuverPlan.ComputeTransferWindow(target, Game.Clock.SimSeconds);
+        if (!w.valid) return;
+
+        if (ManeuverPlan.SolveHohmann(target, w.departSimSeconds, out ManeuverPlan.Node departure, out ManeuverPlan.Node arrival))
+            state.Maneuver.SetPair(departure, arrival);
+    }
+
+    private static NodeData FindTarget(SystemData sys, string name)
+    {
+        if (sys == null || string.IsNullOrEmpty(name)) return null;
+        foreach (NodeData n in sys.nodes)
+            if (n.name == name) return n;
+        return null;
     }
 
     private void AutoFit(ShipOrbit orbit)

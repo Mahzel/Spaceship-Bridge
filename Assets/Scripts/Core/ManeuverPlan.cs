@@ -206,14 +206,39 @@ public sealed class ManeuverPlan
         return h.sqrMagnitude > 1e-12f ? h.normalized : Vector3.up;
     }
 
+    /// <summary>Core Hohmann-geometry numbers shared by SolveHohmann (which turns them into burns) and
+    /// ComputeTransferWindow (which only needs the transfer time and delta-v magnitudes for a preview).
+    /// r1, r2, mu in the same units in/out; angles in radians, dv in the same speed unit as mu implies
+    /// (game-units/simSecond here, since that's what ShipOrbit.Mu is in).</summary>
+    private struct HohmannGeometry
+    {
+        public double dv1, dv2, transferTimeSeconds;
+    }
+
+    private static HohmannGeometry SolveHohmannGeometry(double mu, double r1, double r2)
+    {
+        double aT = (r1 + r2) / 2.0;
+        double v1Circ = Math.Sqrt(mu / r1);
+        double v2Circ = Math.Sqrt(mu / r2);
+        double vTransferAtR1 = Math.Sqrt(mu * (2.0 / r1 - 1.0 / aT));
+        double vTransferAtR2 = Math.Sqrt(mu * (2.0 / r2 - 1.0 / aT));
+        return new HohmannGeometry
+        {
+            dv1 = vTransferAtR1 - v1Circ,               // departure: speed up (or slow, if r2 < r1) onto the transfer ellipse
+            dv2 = v2Circ - vTransferAtR2,                // arrival: match the target's circular speed
+            transferTimeSeconds = Math.PI * Math.Sqrt(aT * aT * aT / mu)
+        };
+    }
+
     /// <summary>
     /// Basic two-burn coplanar-approximation Hohmann transfer from the ship's current orbit (treated as
     /// circular at its current semi-major axis) to a target body's orbit around the SAME primary. Not an
     /// optimal solver: it doesn't time the plane-change component to the true line of nodes, just folds a
-    /// rough plane-change delta-v into the arrival burn's normal axis. Good enough to get a player from
-    /// "orbiting star X" to "roughly matching target Y's orbit" without hand-deriving the transfer.
+    /// rough plane-change delta-v into the arrival burn's normal axis. departureSimSeconds is when the
+    /// departure burn fires - pass "now" for an immediate (phase-blind) transfer, or
+    /// ComputeTransferWindow's DepartSimSeconds to wait for the window that actually meets the target.
     /// </summary>
-    public static bool SolveHohmann(NodeData target, double nowSimSeconds, out Node departure, out Node arrival)
+    public static bool SolveHohmann(NodeData target, double departureSimSeconds, out Node departure, out Node arrival)
     {
         departure = default;
         arrival   = default;
@@ -227,33 +252,105 @@ public sealed class ManeuverPlan
         float  r2 = target.orbit.semiMajorAxis;
         if (r1 <= 0f || r2 <= 0f || mu <= 0.0) return false;
 
-        double aT = (r1 + r2) / 2.0;
-        double v1Circ = Math.Sqrt(mu / r1);
-        double v2Circ = Math.Sqrt(mu / r2);
-        double vTransferAtR1 = Math.Sqrt(mu * (2.0 / r1 - 1.0 / aT));
-        double vTransferAtR2 = Math.Sqrt(mu * (2.0 / r2 - 1.0 / aT));
-        double transferTimeSeconds = Math.PI * Math.Sqrt(aT * aT * aT / mu);
-
-        double dv1 = vTransferAtR1 - v1Circ;               // departure: speed up (or slow, if r2 < r1) onto the transfer ellipse
-        double dv2 = v2Circ - vTransferAtR2;                // arrival: match the target's circular speed
+        HohmannGeometry g = SolveHohmannGeometry(mu, r1, r2);
 
         // Rough plane-change, folded into the arrival burn rather than timed to the true line of nodes.
+        double v2Circ = Math.Sqrt(mu / r2);
         float inclDeltaDeg = Mathf.Abs(target.orbit.inclination - orbit.Elements.inclination);
         double dvPlane = 2.0 * v2Circ * Math.Sin(inclDeltaDeg * Mathf.Deg2Rad / 2.0);
 
         float kmPerUnit = (float)ShipState.KmPerUnit; // game-units/simSecond -> km/s
         departure = new Node
         {
-            simSeconds  = nowSimSeconds,
-            progradeKmS = (float)(dv1 * kmPerUnit),
+            simSeconds  = departureSimSeconds,
+            progradeKmS = (float)(g.dv1 * kmPerUnit),
             normalKmS   = 0f
         };
         arrival = new Node
         {
-            simSeconds  = nowSimSeconds + transferTimeSeconds,
-            progradeKmS = (float)(dv2 * kmPerUnit),
+            simSeconds  = departureSimSeconds + g.transferTimeSeconds,
+            progradeKmS = (float)(g.dv2 * kmPerUnit),
             normalKmS   = (float)(dvPlane * kmPerUnit)
         };
         return true;
+    }
+
+    /// <summary>Preview of when the NEXT Hohmann window to `target` opens - the phase angle the target needs
+    /// to lead (or trail) the ship by at departure so it's actually AT the rendezvous point when the transfer
+    /// ends, not just "some point on its orbit". SolveHohmann itself is phase-blind (it'll compute correct
+    /// burn sizes for a transfer starting right now, but the target usually won't be there yet); this is what
+    /// lets a caller wait for DepartSimSeconds before arming those burns. Same coplanar-circular assumptions
+    /// as SolveHohmann (and the same "same primary" requirement).</summary>
+    public struct TransferWindow
+    {
+        public bool   valid;
+        public double phaseNowDeg, phaseIdealDeg;   // target's lead angle over the ship, now vs. at departure
+        public double waitSeconds;                  // 0 if the window is already open
+        public double departSimSeconds;
+        public double transferTimeSeconds;
+        public float  departureDvKmS, arrivalDvKmS;
+        public float  TotalDvKmS => departureDvKmS + arrivalDvKmS;
+    }
+
+    public static TransferWindow ComputeTransferWindow(NodeData target, double nowSimSeconds)
+    {
+        TransferWindow w = default;
+
+        ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
+        if (orbit == null || !orbit.Valid || target == null || !target.hasOrbit) return w;
+        if (target.parent != orbit.PrimaryIndex) return w;
+        if (!orbit.RelativeStateAt(nowSimSeconds, out Vector3 shipRel, out Vector3 _)) return w;
+
+        double mu = orbit.Mu;
+        float  r1 = orbit.Elements.semiMajorAxis;
+        float  r2 = target.orbit.semiMajorAxis;
+        if (r1 <= 0f || r2 <= 0f || mu <= 0.0) return w;
+
+        HohmannGeometry g = SolveHohmannGeometry(mu, r1, r2);
+
+        // Mean motion of each body around the shared primary (rad/s) - the same circular approximation the
+        // burn sizes already use.
+        double r1d = r1;
+        double n1 = Math.Sqrt(mu / (r1d * r1d * r1d));
+        double n2 = target.orbit.orbitalPeriod > 0.0 ? 2.0 * Math.PI / target.orbit.orbitalPeriod : 0.0;
+
+        Vector3 targetOffsetNow = KeplerOrbit.OffsetAt(target.orbit, nowSimSeconds);
+        double thetaShip = Math.Atan2(shipRel.z, shipRel.x);
+        double thetaTarget = Math.Atan2(targetOffsetNow.z, targetOffsetNow.x);
+        double gammaNow = Mod2Pi(thetaTarget - thetaShip);          // target's current lead over the ship
+        double gammaIdeal = Mod2Pi(Math.PI - n2 * g.transferTimeSeconds); // lead needed AT departure
+
+        // gamma changes at (n2 - n1) rad/s; find the smallest t >= 0 where it next equals gammaIdeal.
+        double omega = n2 - n1;
+        double waitSeconds;
+        if (Math.Abs(omega) < 1e-15) waitSeconds = 0.0; // r1 == r2: no real transfer, but don't divide by zero
+        else if (omega > 0.0) waitSeconds = Mod2Pi(gammaIdeal - gammaNow) / omega;
+        else waitSeconds = Mod2Pi(gammaNow - gammaIdeal) / -omega;
+
+        // Same rough plane-change SolveHohmann folds into the arrival burn - included here too so the
+        // previewed Δv matches what CREATE NODES will actually arm.
+        double v2Circ = Math.Sqrt(mu / r2);
+        float inclDeltaDeg = Mathf.Abs(target.orbit.inclination - orbit.Elements.inclination);
+        double dvPlane = 2.0 * v2Circ * Math.Sin(inclDeltaDeg * Mathf.Deg2Rad / 2.0);
+        double arrivalDv = Math.Sqrt(g.dv2 * g.dv2 + dvPlane * dvPlane);
+
+        float kmPerUnit = (float)ShipState.KmPerUnit;
+        w.valid = true;
+        w.phaseNowDeg = gammaNow * Mathf.Rad2Deg;
+        w.phaseIdealDeg = gammaIdeal * Mathf.Rad2Deg;
+        w.waitSeconds = waitSeconds;
+        w.departSimSeconds = nowSimSeconds + waitSeconds;
+        w.transferTimeSeconds = g.transferTimeSeconds;
+        w.departureDvKmS = Mathf.Abs((float)(g.dv1 * kmPerUnit));
+        w.arrivalDvKmS = (float)(arrivalDv * kmPerUnit);
+        return w;
+    }
+
+    /// <summary>x mod 2*pi, into [0, 2*pi).</summary>
+    private static double Mod2Pi(double x)
+    {
+        const double twoPi = 2.0 * Math.PI;
+        double m = x % twoPi;
+        return m < 0.0 ? m + twoPi : m;
     }
 }

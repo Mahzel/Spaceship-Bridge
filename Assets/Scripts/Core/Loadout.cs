@@ -9,7 +9,9 @@ using UnityEngine;
 // spectrometer one run, a big imager the next) instead of climbing one fixed ladder.
 //
 // Levels: 0 = not fitted (sensors) / stock (modules), 1..3 = Mk I..Mk III. The waterfall Mk I is always fitted and
-// free: a zero-trust probe can still hear contacts and earn its way back.
+// free: a zero-trust probe can still hear contacts and earn its way back. NavComputer Mk I is the same baseline -
+// every probe reads its own orbit for free; trust only buys the higher tiers (transfer planner, galaxy map, orbit
+// determination).
 //
 // Sensor tiers are built from the spec assets in Resources/Specs: the asset of each type is Mk I (your current
 // tuning), and Mk II / Mk III are clones improved by LoadoutSpecs.Improve. An asset named exactly
@@ -42,7 +44,7 @@ public sealed class Loadout
         new[] { 0, 2, 4, 7 },   // Tank
         new[] { 0, 2, 4, 7 },   // Storage
         new[] { 0, 2, 4, 7 },   // Transmitter
-        new[] { 0, 3, 6, 10 },  // NavComputer
+        new[] { 0, 0, 6, 10 },  // NavComputer (Mk I free, always fitted - same baseline as the waterfall)
     };
 
     private readonly int[] _level = new int[All.Length];
@@ -52,7 +54,7 @@ public sealed class Loadout
     public Loadout() { ResetToBaseline(); }
 
     public static bool IsSensor(ProbeSystem s) => s <= ProbeSystem.Radar;
-    public static int MinLevel(ProbeSystem s) => s == ProbeSystem.Waterfall ? 1 : 0;
+    public static int MinLevel(ProbeSystem s) => s == ProbeSystem.Waterfall || s == ProbeSystem.NavComputer ? 1 : 0;
     public static int Cost(ProbeSystem s, int level) => Costs[(int)s][Mathf.Clamp(level, 0, MaxLevel)];
 
     /// <summary>

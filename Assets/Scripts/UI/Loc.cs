@@ -205,6 +205,15 @@ public static class Loc
         { "ui.nav.label.ship",   "SHIP" },
         { "ui.nav.layer.catalogue", "CATALOGUE" },
         { "ui.nav.layer.tracks",    "TRACKS" },
+        { "ui.nav.transfer.header",      "TRANSFER" },
+        { "ui.nav.transfer.none",        "TARGET   none (click an identified track)" },
+        { "ui.nav.transfer.target",      "TARGET   {0}" },
+        { "ui.nav.transfer.unavailable", "No transfer solution (different primary, or no stable orbit)." },
+        { "ui.nav.transfer.phase",       "PHASE {0:F0} deg / needs {1:F0} deg" },
+        { "ui.nav.transfer.window.open", "WINDOW OPEN NOW" },
+        { "ui.nav.transfer.window.wait", "WINDOW IN {0:F1} d" },
+        { "ui.nav.transfer.dv",          "dv {0:F2} + {1:F2} km/s   ToF {2:F1} d" },
+        { "ui.nav.transfer.create",      "CREATE NODES" },
 
         // Maneuver
         { "ui.maneuver",  "MANEUVER" },

@@ -272,3 +272,54 @@ step - the map core, the ship's own conic and now the catalogue/track layers are
 click against. Item 4 (timeline strip) depends on it. The sensor-cone overlay (still open from item 2's own
 scope) could also be picked up first if preferred, since it's a smaller, independent addition to
 `DrawTrackLayer`'s sibling passes.
+
+## Progress (this session - NavComputer baseline, item 5: transfer helper)
+
+- **`Core/Loadout.cs`**: `NavComputer` is now baseline like the waterfall - `MinLevel` returns 1 for it (was
+  0), and its cost row changed from `{0,3,6,10}` to `{0,0,6,10}` (Mk I free). `ResetToBaseline`/`FromList`
+  already drive off `MinLevel`, so every new game and every loaded save (old ones included - `FromList`
+  clamps a saved level up to `MinLevel`) now starts with `HasSystemView` true and the NAV button visible from
+  the first flight, no refit trip required. Mk II/III (transfer planner, galaxy map, orbit determination)
+  still cost trust same as before.
+- **`Core/ManeuverPlan.cs`**: turns out roadmap item 5's Hohmann math already existed
+  (`SolveHohmann`/`Node.TotalDvKmS`, used by `UI/NodePanel.cs`'s existing text-only "plot a transfer" button)
+  - what was missing was the WINDOW: `SolveHohmann` arms its departure burn at whatever time it's given, with
+  no check that the target will actually be at the rendezvous point when the ship gets there. Added
+  `ComputeTransferWindow(target, now)`: the classic phase-angle formula (`gammaIdeal = pi - n2*transferTime`)
+  against the current angular separation between ship and target (both read off the same shared-primary
+  frame `NavScreen` already uses), giving phase now vs. ideal, wait time, the resulting depart time, and the
+  same Δv/time-of-flight `SolveHohmann` would produce. Refactored the shared dv/transfer-time algebra into a
+  small private `SolveHohmannGeometry` so `SolveHohmann` and `ComputeTransferWindow` can't drift apart.
+  `SolveHohmann`'s time parameter is now named `departureSimSeconds` (was `nowSimSeconds`) to make clear it's
+  not always "right now" anymore - `NodePanel`'s existing call site (passes `Game.Clock.SimSeconds`, i.e.
+  still "now") is unaffected, it just keeps making the same phase-blind transfer it always did.
+- **`UI/NavScreen.cs`**: a TRANSFER section in the sidebar (target name, phase now/ideal, wait/window, Δv +
+  ToF, a CREATE NODES button) reading `Game.State.TargetBodyName` - the same field `Display/SystemScreen.cs`
+  sets when a row there is clicked, so a target picked on either screen shows up on both. Clicking a track's
+  marker directly on the NAV map (new `PointerAim` on `_mapRect`, `_map.raycastTarget` flipped on) now does
+  the same selection `SystemScreen.Select` does (`Tracks.SelectedId` + `SetTarget` from `info.catalogName` if
+  identified) - `_trackHits`, a list of `(trackId, lastDrawnScreenPos)` rebuilt every `DrawTrackLayer` call,
+  is what the click hit-tests against (nearest within `TrackClickRadiusPx`). CREATE NODES recomputes the
+  window fresh (it may have shifted since the last redraw tick) and arms `SolveHohmann`'s two burns at
+  `w.departSimSeconds` via the existing `ManeuverPlan.SetPair` - the same queue `NodePanel`'s ARM/WARP/CLEAR
+  buttons already operate on, so warping to the burn works with no changes there.
+- Only catalogued/tracked bodies sharing the ship's current primary are ever offered as a transfer target
+  (same restriction `SolveHohmann` already had - "same primary only"); the sidebar just says so via the
+  "unavailable" message rather than silently doing nothing.
+
+**Not compile-checked** (same batchmode/license-lock issue noted throughout this file). The phase-angle math
+in particular deserves an in-Editor sanity check against a known case (e.g. Earth -> Mars from a circular
+LEO-scale start) before trusting the wait-time numbers.
+
+**Known gaps / rough edges to fix on first look:**
+- `ComputeTransferWindow` assumes both ship and target orbit the primary in the SAME rotational sense
+  (prograde); a retrograde target would get a wrong wait time. `SolveHohmann`'s own burn-size math doesn't
+  care about direction, only the new phase-window code does.
+- No on-map preview of the transfer ellipse itself, and no indication of WHERE (which point on the ship's
+  current orbit) the departure burn happens - the sidebar's numbers are the only feedback until item 3 (node
+  placement + predicted path) lands and can draw it.
+- CREATE NODES silently no-ops if the target isn't found in the current `SystemData` (e.g. target set, then
+  the ship jumped systems without clearing it) - matches `NodePanel.PlotTransfer`'s existing behaviour, not a
+  new gap, but worth a "target lost" message if it comes up in testing.
+- No warp-to-departure convenience button on the NAV screen itself; `NodePanel`'s existing WARP button (NODE
+  tab of `SystemsDock`) already works on the same queue, so this is a nice-to-have, not a blocker.

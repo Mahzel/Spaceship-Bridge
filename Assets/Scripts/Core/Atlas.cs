@@ -51,6 +51,15 @@ public sealed class AtlasEntry
     /// <summary>Set once a debrief review flags this entry as wrong (shown as DISPUTED). Only entries with isFalse can ever be
     /// caught; catching one is a separate, later roll (GameState.GetReviewChance) — not wired up yet.</summary>
     public bool caught;
+
+    /// <summary>World bearing the source DataRecord claimed, and its range estimate (TMA or radar) at the time
+    /// it was recorded - carried over from DataRecord.bearing/.range so a delivered entry still remembers
+    /// roughly where its contact was, even once the record itself (and the track it came from) is long gone.
+    /// recordedRange.valid is false for an entry whose record never got a usable range (bearing only) - see
+    /// GhostContact, which reads these to recall a body as a fresh, aimable track ("go check if it's still
+    /// there"), never anything omniscient: exactly the estimate (uncertainty included) the record already had.</summary>
+    public float recordedBearing;
+    public RangeEstimate recordedRange;
 }
 
 /// <summary>
@@ -110,6 +119,10 @@ public sealed class Atlas
             existing.recordedTime = time;
             if (r.kind == DataKind.Raw) existing.kind = DataKind.Raw;
             if (string.IsNullOrEmpty(existing.bodyName)) existing.bodyName = r.bodyName;
+            // Freshest fix wins, same as recordedTime above - a later record's estimate is what the player
+            // actually knew last, not an average of every sighting this run.
+            existing.recordedBearing = r.bearing;
+            existing.recordedRange = r.range;
             if (Changed != null) Changed();
             return existing;
         }
@@ -125,6 +138,8 @@ public sealed class Atlas
         e.runNumber = runNumber;
         e.recordedTime = time;
         e.bodyName = r.bodyName;
+        e.recordedBearing = r.bearing;
+        e.recordedRange = r.range;
 
         float falseChance = Mathf.Clamp01(0.85f * (1f - Mathf.Clamp01(r.sourceQuality)));
         double roll = Transmitter.Roll(worldSeed, runNumber, r.id, -1, -1);

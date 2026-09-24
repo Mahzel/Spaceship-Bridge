@@ -45,12 +45,22 @@ public sealed class AtlasPanel
     private readonly List<Item> _items = new List<Item>();
     private TextMeshProUGUI _title, _crumb, _empty, _details, _pageLabel;
     private TextMeshProUGUI _h0, _h1, _h2, _h3, _h4;
-    private Button _back, _prev, _next;
+    private Button _back, _prev, _next, _recall;
+    private TextMeshProUGUI _recallLabel, _recallFlash;
     private GameObject _pager;
 
     private Level _level = Level.Systems;
     private string _system, _body;
     private int _page;
+
+    // RECALL target for the current Level.Body page (set fresh by BuildBody every Refresh) - see
+    // GhostContact.FromCatalogued/FromEntry. _recallData/_recallNodeIndex for the precise catalogued-orbit
+    // path, _recallEntry for the rough coasted-fix path; at most one of the two is set at a time.
+    private SystemData _recallData;
+    private int _recallNodeIndex = -1;
+    private AtlasEntry _recallEntry;
+    private string _recallName;
+    private float _flashHold;
 
     // Regenerated systems, for the body tree and body details (deterministic per world seed).
     private readonly Dictionary<string, SystemData> _systems = new Dictionary<string, SystemData>();
@@ -82,6 +92,12 @@ public sealed class AtlasPanel
         _details = UIKit.AddLabel(prt, "", t.fontSizeSmall, t.text);
         _details.textWrappingMode = TextWrappingModes.Normal;
         UIKit.Size(_details.rectTransform, preferredWidth: 610f);
+
+        RectTransform recallRow = UIKit.Node("Recall", prt);
+        UIKit.HStack(recallRow, 8f, 0).childAlignment = TextAnchor.MiddleLeft;
+        _recall = UIKit.AddButton(recallRow, Loc.Get("ui.atlas.recall"), OnRecallClicked, 220f, 30f);
+        _recallLabel = _recall.GetComponentInChildren<TextMeshProUGUI>();
+        _recallFlash = UIKit.AddLabel(recallRow, "", t.fontSizeSmall, t.textDim);
 
         RectTransform header = UIKit.Node("Header", prt);
         UIKit.HStack(header, 6f, 0).childAlignment = TextAnchor.MiddleLeft;
@@ -166,6 +182,18 @@ public sealed class AtlasPanel
         Refresh();
     }
 
+    /// <summary>Seeds a fresh, aimable track from the current body page's RECALL target (set by BuildBody
+    /// every Refresh) - a precise recall off a catalogued orbit, or a rough one coasted forward from the
+    /// freshest survey fix on file. See GhostContact's own doc comment for what each does and doesn't know.</summary>
+    private void OnRecallClicked()
+    {
+        Track tr = _recallNodeIndex >= 0 ? GhostContact.FromCatalogued(_recallData, _recallNodeIndex, _recallName)
+                 : _recallEntry != null ? GhostContact.FromEntry(_recallEntry, _recallName)
+                 : null;
+        UIKit.SetText(_recallFlash, Loc.Get(tr != null ? "ui.atlas.recall.done" : "ui.atlas.recall.full", tr?.name ?? ""));
+        _flashHold = 4f;
+    }
+
     private void Back()
     {
         switch (_level)
@@ -207,6 +235,14 @@ public sealed class AtlasPanel
         _details.gameObject.SetActive(details.Length > 0);
         UIKit.SetText(_details, details);
         SetHeader();
+
+        if (_level != Level.Body) { _recallData = null; _recallNodeIndex = -1; _recallEntry = null; }
+        bool canRecall = _recallNodeIndex >= 0 || _recallEntry != null;
+        _recall.gameObject.SetActive(_level == Level.Body);
+        _recall.interactable = canRecall;
+        UIKit.SetText(_recallLabel, Loc.Get(_recallNodeIndex >= 0 ? "ui.atlas.recall"
+                                          : _recallEntry != null ? "ui.atlas.recall.rough" : "ui.atlas.recall.none"));
+        if (_flashHold > 0f) _flashHold -= Time.unscaledDeltaTime; else UIKit.SetText(_recallFlash, "");
 
         int pages = Mathf.Max(1, (_items.Count + RowsPerPage - 1) / RowsPerPage);
         _page = Mathf.Clamp(_page, 0, pages - 1);
@@ -431,18 +467,32 @@ public sealed class AtlasPanel
     private string BuildBody(IList<AtlasEntry> all, string systemId, string bodyName)
     {
         bool catalogued = false;
+        AtlasEntry bestFix = null; // most recent entry under this body with a usable position fix
         for (int i = 0; i < all.Count; i++)
         {
             AtlasEntry e = all[i];
             if (e.systemId != systemId || e.bodyName != bodyName) continue;
             if (e.catalogued) { catalogued = true; continue; }
             _items.Add(EntryItem(e));
+            if (e.recordedRange.valid && (bestFix == null || e.recordedTime > bestFix.recordedTime)) bestFix = e;
         }
         if (_items.Count == 0) _items.Add(new Item { c0 = Loc.Get("ui.atlas.nosurvey"), dim = true });
 
         SystemData data = GetSystem(systemId);
         NodeData node = null;
-        if (data != null) foreach (NodeData nd in data.nodes) if (nd.name == bodyName) { node = nd; break; }
+        int nodeIndex = -1;
+        if (data != null)
+            for (int i = 0; i < data.nodes.Count; i++)
+                if (data.nodes[i].name == bodyName) { node = data.nodes[i]; nodeIndex = i; break; }
+
+        // RECALL target for this body page: a catalogued body with a known orbit gets a precise recall (exact
+        // position, per GhostContact.FromCatalogued); otherwise the freshest survey fix, if any, gets a rough
+        // coasted-forward recall (GhostContact.FromEntry) - see AtlasPanel's own RECALL handler.
+        if (catalogued && node != null && node.hasOrbit) { _recallData = data; _recallNodeIndex = nodeIndex; _recallEntry = null; }
+        else if (bestFix != null) { _recallData = null; _recallNodeIndex = -1; _recallEntry = bestFix; }
+        else { _recallData = null; _recallNodeIndex = -1; _recallEntry = null; }
+        _recallName = ShortName(bodyName);
+
         return node != null ? Details(data, node, catalogued) : bodyName;
     }
 

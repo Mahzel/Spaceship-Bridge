@@ -21,7 +21,7 @@ public struct BearingSample
 }
 
 /// <summary>Where a track's elevation estimate came from, coarsest to finest in the usual case.</summary>
-public enum ElevationSource { None, Waterfall, Radar, Imager }
+public enum ElevationSource { None, Waterfall, Radar, Imager, Atlas }
 
 /// <summary>
 /// A bearing track held in WORLD azimuth. Built only from detections, never from true positions.

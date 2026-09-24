@@ -459,3 +459,43 @@ transfer is exactly the repro) and confirm only one track/contact appears, not a
   goal from a few messages earlier in this same session. Flagging rather than guess-patching orbital math with
   no way to test it: worth deciding whether that's working as intended (get a better fix before committing to
   CREATE NODES) or whether the planner should refuse/warn below some fit-quality threshold.
+
+## Progress (this session - radar TRACK-mode ETA cheat, Atlas RECALL / ghost contacts)
+
+- **Radar TRACK ETA cheat:** `RadarProcessor.FireTrack` computed its pending-ping ETA from
+  `FindNearestInBeam`'s own result (`found`/`rangeAu`) - an omniscient "what's actually in the beam" lookup,
+  leaking both whether anything was there and roughly how far before the ping had a chance to tell the player
+  anything. Sweep never did this (always the selected max range - already correct, per the user's own stated
+  spec). Fixed: TRACK's ETA now uses the track's own current range ESTIMATE (`tr.range`, TMA or a prior radar
+  fix) when it has one, and falls back to the full instrumented max range otherwise - matching sweep. Only the
+  wait time the player is told changes; `Resolve()`'s actual hit/miss/range is unchanged, still read from the
+  true beam contents at fire time (that's the sensor doing its job, not the cheat).
+
+- **Atlas RECALL (ghost contacts):** a body already on file (Atlas) can be recalled as a fresh, aimable
+  Tentative track in the current run - new `Tracking/GhostContact.cs`, a RECALL button on `AtlasPanel`'s BODY
+  page. Two confidence levels, deliberately NOT the same:
+  - **Catalogued bodies** (a full `NodeData.orbit` on file): `GhostContact.FromCatalogued` uses the same
+    analytic Kepler propagation `ShipOrbit`/`OrbitFit` already use (`OrbitalMechanics.NodeState`) - the TRUE
+    current bearing/elevation/range/range-rate, not a guess, because a catalogued orbit genuinely isn't one.
+  - **Any other survey entry:** `AtlasEntry` gained `recordedBearing`/`recordedRange` (carried over from the
+    source `DataRecord.bearing`/`.range` in `Atlas.Log()`, both the new-entry and merge paths - freshest fix
+    wins, same rule already used for `recordedTime`). `GhostContact.FromEntry` coasts that old position+
+    velocity fix forward to now at constant velocity - the SAME straight-line model TMA itself assumes - with
+    no elevation (never measured) and a sigma that widens with how stale the fix is (+5%/day, uncapped).
+  - Neither path calls `ApplySupport`: that would artificially confirm a lock the player hasn't actually
+    re-acquired. The seeded track stays Tentative (red/searching) until a real sensor finds something there -
+    `SensorSight` is never touched either (player-facing code must not call it; the geometry is a small
+    duplicated bearing/elevation formula against `Game.State.Ship`'s own known position).
+  - AtlasPanel's BODY page now tracks a RECALL target every `Refresh()` (`BuildBody` sets
+    `_recallData`/`_recallNodeIndex` for the precise path or `_recallEntry` for the rough one), shows which
+    kind is available (or that neither is, for a body with no position fix on file at all - only ever true for
+    an entry logged before this change, or a bearing-only claim), and selects the new track
+    (`Tracks.SelectedId`) on success so the player can jump straight to a sensor's SEL.
+  - `ElevationSource` gained an `Atlas` value (the elevation-fix source for a catalogued recall).
+
+**Not compile-checked**, same caveat as everywhere else in this file. `GhostContact`'s unit handling is worth
+a specific look: `OrbitalMechanics.NodeState`'s velocity is game-units/simSecond, `ShipState.vx/vy/vz` is
+km/s against that same sim-second clock (per `ManeuverPlan.Execute`, burns add straight in with no extra
+rate scaling) - the conversion there is spatial-only (`* ShipState.KmPerUnit`), mirroring exactly how
+`OrbitFit.TryFit` already converts `RangeEstimate.vxKmS`/`.vzKmS` the other way (`/ KmPerUnit`). Worth
+confirming a RECALLed catalogued body's seeded range-rate actually reads sane in the UI before trusting it.

@@ -765,3 +765,38 @@ safety warning" call - unblocked, so it's done now.
 artificially low periapsis (a manoeuvre that dips inside a planet's radius) to confirm the row actually goes
 red and the label reads right, since this is the one change this session where getting the number wrong would
 look like the game crying wolf (or worse, staying silent) about a real crash.
+
+## Progress (this session - fixing the timeline/map overflow the timeline strip itself caused)
+
+User-reported, with a screenshot: the timeline strip rendered ON TOP of the bottom of the NAV screen instead
+of below it - the map's own orbit line drawn over the timeline's rows, and the timeline's WARP TO buttons
+sitting on top of the sidebar's CREATE + ARM NODES button (unclickable as a result). Root cause: the map's own
+`minHeight` (600f) predates the timeline strip - together, map(600) + timeline(the four-row version's ~142px)
++ topbar + tab row no longer fit inside a modest window. A `LayoutElement`'s `minHeight` isn't a soft hint:
+when the available space is less than what a node demands, Unity still renders it at that minimum, overflowing
+past whatever boundary its parent/siblings actually had - which is exactly what a `RectMask2D` (already on
+`_mapRect`, from the earlier "map renders outside its bounds" fix) does NOT protect against, since a mask
+only clips CONTENT drawn past the node's OWN bounds, not the node's own oversized bounds bleeding into a
+sibling's territory. This was flagged as a real risk in this feature's own commit ("worth an in-Editor look at
+whether the NAV tab still has enough vertical room") - it wasn't, and the report confirms it.
+
+Fixed on both sides, aiming for real margin rather than a bare fit:
+- `BuildMap`: `minHeight` 600f -> 360f.
+- `BuildTimeline`: `TimelineRows` 4 -> 2, and each row/button shrunk slightly (24/20px -> 22/18px). Two rows
+  is a real feature reduction (fewer upcoming events visible at once), not just a cosmetic tweak - picked
+  deliberately over shrinking the map further, since the map is this screen's main content.
+
+**Flagging honestly rather than claiming this is definitely fully fixed:** working through the numbers by
+hand (no Editor to actually check), the sidebar's OWN content - the inclination dial (160px, itself drawn
+with hardcoded pixel coordinates that don't scale with its container, so DON'T shrink that box further without
+also touching `DrawDial`'s own numbers) plus the zoom/layer rows plus the whole TRANSFER section - already
+adds up to something in the neighbourhood of 500px on its own, independent of the map or the timeline. That
+was already true before this session's changes and evidently fit before (no prior report of it overflowing),
+but the margin against it wasn't accounted for as carefully as the map/timeline numbers above - if the timeline
+strip STILL crowds the sidebar's own bottom content after this fix, the properly robust fix is a scrollable
+sidebar (a `ScrollRect`, not used anywhere else in this codebase yet, so worth building carefully rather than
+improvised blind) rather than continuing to shave fixed pixel budgets against each other.
+
+**Not compile-checked**, same caveat as everywhere else in this file. This is the one change in the whole
+session that most needs an actual in-Editor look before trusting it - it's a guess at numbers, informed by
+reading every `UIKit.Size` call in the chain but not by seeing it rendered.

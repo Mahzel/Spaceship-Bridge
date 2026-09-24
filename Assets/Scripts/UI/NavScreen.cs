@@ -76,7 +76,11 @@ public sealed class NavScreen
     private float _redrawAccum = RedrawInterval;
 
     // Timeline strip (roadmap item 4): the ship's own next Pe/Ap passage plus each queued burn, soonest first.
-    private const int TimelineRows = 4;
+    // 2 rows, not 4 - kept deliberately compact (see BuildTimeline's own comment): the sidebar's OWN content
+    // (dial + zoom/layer rows + the whole TRANSFER section) already runs to roughly 500px on its own, so this
+    // strip has very little real headroom to spend before it starts competing with the sidebar too, not just
+    // the map.
+    private const int TimelineRows = 2;
     private sealed class TimelineRow { public GameObject go; public TextMeshProUGUI label; public Button warpTo; }
     private readonly TimelineRow[] _timelineRows = new TimelineRow[TimelineRows];
     private readonly List<NavEvent> _eventScratch = new List<NavEvent>();
@@ -125,14 +129,20 @@ public sealed class NavScreen
     /// queued burns - see its own doc comment for what's still missing). A fixed-height strip under the
     /// Map+Sidebar row, same "outer LayoutElement / inner Stretch+VStack" decoupling as the sidebar and
     /// GameShell's own sidebar - see either's comment for why a VerticalLayoutGroup can't share a node with
-    /// the LayoutElement that's supposed to fix this strip's height.</summary>
+    /// the LayoutElement that's supposed to fix this strip's height.
+    ///
+    /// Reported: this strip's fixed height plus the map's own 600px minimum no longer fit together in a
+    /// modest window - the map overflowed past its own allocated space and rendered on top of the timeline
+    /// (and, with it, the corner overlays living inside the map rect). Fixed on both sides: the map's own
+    /// minimum came down (see BuildMap's comment) and this strip is kept deliberately small - 2 short rows,
+    /// not 4, tight row height - rather than let either one silently reclaim the space back later.</summary>
     private void BuildTimeline(Transform parent)
     {
         UITheme t = UITheme.Current;
 
         RectTransform outer = UIKit.Node("Timeline", parent);
         _timelineStrip = outer.gameObject;
-        UIKit.Size(outer, flexibleWidth: 1f, minHeight: 30f + TimelineRows * 28f);
+        UIKit.Size(outer, flexibleWidth: 1f, minHeight: 24f + TimelineRows * 24f);
 
         Image bg = UIKit.AddPanel(outer, "Bg", t.panelColor);
         RectTransform inner = bg.rectTransform;
@@ -150,10 +160,10 @@ public sealed class NavScreen
             UIKit.HStack(rt, 8f, 0).childAlignment = TextAnchor.MiddleLeft;
 
             row.label = UIKit.AddLabel(rt, "", t.fontSizeSmall, t.text);
-            UIKit.Size(row.label.rectTransform, flexibleWidth: 1f, minHeight: 20f);
+            UIKit.Size(row.label.rectTransform, flexibleWidth: 1f, minHeight: 18f);
 
             int idx = i; // capture
-            row.warpTo = UIKit.AddButton(rt, Loc.Get("ui.nav.timeline.warpto"), () => WarpToEvent(idx), 90f, 24f);
+            row.warpTo = UIKit.AddButton(rt, Loc.Get("ui.nav.timeline.warpto"), () => WarpToEvent(idx), 90f, 22f);
 
             row.go.SetActive(false);
             _timelineRows[i] = row;
@@ -198,7 +208,11 @@ public sealed class NavScreen
     private void BuildMap(Transform parent)
     {
         _mapRect = UIKit.Node("Map", parent);
-        UIKit.Size(_mapRect, flexibleWidth: 1f, minHeight: 600f, flexibleHeight: 1f);
+        // minHeight was 600f before the timeline strip below claimed its own fixed slice of the same column -
+        // together they no longer fit inside a modest window (reported: the map overflowed past its own
+        // allocated space and rendered on top of the timeline, and the corner overlays with it). 360f leaves
+        // real headroom even at ~660px of total vertical space (topbar + tab row + map + timeline).
+        UIKit.Size(_mapRect, flexibleWidth: 1f, minHeight: 360f, flexibleHeight: 1f);
         // RectMask2D on THIS node clips everything drawn/positioned inside it (MapCanvas, marker labels, the
         // corner overlays) to the map's own bounds - a catalogue orbit far bigger than whatever the current
         // zoom was fit to (Saturn's, say, next to a sub-1AU ship orbit) used to render straight through the

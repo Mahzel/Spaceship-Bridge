@@ -42,7 +42,10 @@ public sealed class GameShell
 
         RectTransform row = UIKit.Node("Row", root);
         UIKit.Size(row, flexibleWidth: 1f, flexibleHeight: 1f);
-        UIKit.HStack(row, t.spacing, 0, expandWidth: true).childAlignment = TextAnchor.UpperLeft;
+        // expandWidth: false - the sidebar is a fixed 160px, not an equal partner to split space with
+        // Content; Unity's HorizontalLayoutGroup force-expands EVERY child under expandWidth:true regardless
+        // of preferredWidth, which is what made the sidebar balloon to half the screen.
+        UIKit.HStack(row, t.spacing, 0, expandWidth: false).childAlignment = TextAnchor.UpperLeft;
 
         BuildSidebar(row, t);
         BuildContent(row, t);

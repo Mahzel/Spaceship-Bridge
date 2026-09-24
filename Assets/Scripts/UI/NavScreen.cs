@@ -88,7 +88,9 @@ public sealed class NavScreen
 
         RectTransform body = UIKit.Node("Body", prt);
         UIKit.Size(body, flexibleWidth: 1f, flexibleHeight: 1f);
-        var bodyH = UIKit.HStack(body, t.spacing * 2f, 0, expandWidth: true);
+        // expandWidth: false - the sidebar is a fixed 340px, not an equal partner to split space with the
+        // map; see GameShell's identical fix for why expandWidth:true would balloon it.
+        var bodyH = UIKit.HStack(body, t.spacing * 2f, 0, expandWidth: false);
         bodyH.childAlignment = TextAnchor.UpperLeft;
 
         BuildMap(body);
@@ -100,7 +102,7 @@ public sealed class NavScreen
     private void BuildMap(Transform parent)
     {
         _mapRect = UIKit.Node("Map", parent);
-        UIKit.Size(_mapRect, flexibleWidth: 1f, minHeight: 600f);
+        UIKit.Size(_mapRect, flexibleWidth: 1f, minHeight: 600f, flexibleHeight: 1f);
         _map = _mapRect.gameObject.AddComponent<MapCanvas>();
         _map.raycastTarget = true; // clickable: selecting a track here mirrors ContactsScreen's row click
         var aim = _mapRect.gameObject.AddComponent<PointerAim>();

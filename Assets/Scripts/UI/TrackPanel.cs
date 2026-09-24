@@ -52,7 +52,10 @@ public sealed class TrackPanel
         fit.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
         RectTransform header = UIKit.Node("Header", prt);
-        UIKit.HStack(header, 8f, 0, expandWidth: true).childAlignment = TextAnchor.MiddleLeft;
+        // expandWidth: false - the explicit flexibleWidth spacer below is what pushes the button to the
+        // right; expandWidth:true would force the label and button to also grab leftover space and balloon
+        // (see GameShell's identical fix).
+        UIKit.HStack(header, 8f, 0, expandWidth: false).childAlignment = TextAnchor.MiddleLeft;
         UIKit.AddLabel(header, Loc.Get("ui.tracks"), t.fontSizeBody, t.accent);
         UIKit.AddSpacer(header, 0f, flexibleWidth: 1f);
         _collapse = UIKit.AddButton(header, "", ToggleCollapsed, 90f, 30f);

@@ -232,6 +232,7 @@ public static class Loc
         { "ui.nav.timeline.warpto",  "WARP TO" },
         { "ui.nav.timeline.row",     "T- {0}   {1}" },
         { "ui.nav.event.periapsis",  "Periapsis passage" },
+        { "ui.nav.event.periapsis.impact", "IMPACT: periapsis below surface" },
         { "ui.nav.event.apoapsis",   "Apoapsis passage" },
         { "ui.nav.event.burn",       "Burn #{0} ({1:F2} km/s)" },
 

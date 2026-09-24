@@ -189,6 +189,9 @@ public sealed class NavScreen
 
             NavEvent ev = _eventScratch[i];
             UIKit.SetText(row.label, Loc.Get("ui.nav.timeline.row", Loc.Countdown(ev.time - now), ev.label));
+            row.label.color = ev.severity == NavEventSeverity.Critical ? UITheme.Current.danger
+                             : ev.severity == NavEventSeverity.Warning ? UITheme.Current.warning
+                             : UITheme.Current.text;
         }
     }
 

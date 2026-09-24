@@ -737,3 +737,31 @@ first-ever view of the JUMP tab autofits correctly (no `OnShown()`-style forced-
 `NavScreen` has, so it's guarded on the map rect having a real size instead - noted in the code); and whether
 the compressed list columns still read cleanly at ~440px, especially longer generated system IDs in the NAME
 column.
+
+## Progress (this session - the periapsis-impact alert, previously deferred over unit risk)
+
+User confirmed body sizes ARE convertible to game units from real ones the same way distance already is
+(`radiusSol` - solar radii, same field `AtlasPanel`'s own body details already read - times
+`GameConstants.SOLAR_RADIUS_IN_METERS`, divided by `AU_IN_METERS`, times `GAME_UNITS_PER_UA`: the exact same
+metres-per-AU constants distance conversions already use throughout this codebase, just carried one more step
+into game units). That was the specific thing blocking this from the earlier "not attempted, risk of a wrong
+safety warning" call - unblocked, so it's done now.
+
+- **`NavEvent` gained a `severity` field** (`Info`/`Warning`/`Critical`). `NavEvents.Collect`'s periapsis
+  passage event is flagged `Critical` (was always `Info`) when the ship's own periapsis altitude
+  (`ShipOrbit.PeriapsisGame`) is actually below the current primary's surface radius, converted as above -
+  folded into the SAME event rather than a parallel alerts list, since it's the same passage either way.
+  Atmosphere drag/entry isn't modelled (no radius-like field for it found) - this only catches an outright
+  surface impact, not "close enough to burn up", and says so in its own comment.
+- **`NavScreen`'s timeline strip** colours a row by its event's severity now (`t.danger` / `t.warning` /
+  `t.text`) instead of always plain text.
+- **Known limitation, not fixed this pass:** the timeline only shows its 4 soonest events by time - a
+  Critical periapsis further out than 4 sooner (but harmless) events wouldn't be visible yet, since severity
+  doesn't affect which events make the cut, only their colour once shown. Given periapsis recurs every orbit,
+  a genuinely dangerous one should surface on its own soon enough in practice, but a "float Criticals to the
+  top regardless of order" pass would close this gap properly if it turns out to matter.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Worth an in-Editor check with an
+artificially low periapsis (a manoeuvre that dips inside a planet's radius) to confirm the row actually goes
+red and the label reads right, since this is the one change this session where getting the number wrong would
+look like the game crying wolf (or worse, staying silent) about a real crash.

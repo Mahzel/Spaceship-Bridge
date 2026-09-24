@@ -231,7 +231,16 @@ public sealed class RadarProcessor
         _pendingHitAtFire = found;
         _pendingFireRangeAu = found ? rangeAu : 0.0;
         _pendingFireSimTime = Game.Clock.SimSeconds;
-        _pendingDueSimTime = _pendingFireSimTime + spec.RoundTripSimSeconds(found ? rangeAu : spec.maxRangeAu);
+        // The wait the player is TOLD (ETA/_pendingDueSimTime) must come from what the player already knows,
+        // not from `found`/`rangeAu` above (an omniscient beam-contents lookup) - that leaked the true range,
+        // and whether anything was even there, before the ping had a chance to tell them. If the track has no
+        // usable range estimate yet, this is exactly the sweep case: listen out to the full instrumented
+        // range. Only a track with an actual fix (TMA or a prior radar hit) gets an ETA based on it. Note this
+        // only changes how long the player is told to WAIT - the real hit/miss/range below is still resolved
+        // from the true state at fire time (_pendingBody/_pendingFireRangeAu), same as before.
+        RangeEstimate re = tr.range;
+        double etaRangeAu = re.Observable ? re.range / GameConstants.GAME_UNITS_PER_UA : spec.maxRangeAu;
+        _pendingDueSimTime = _pendingFireSimTime + spec.RoundTripSimSeconds(etaRangeAu);
         if (Changed != null) Changed();
         return true;
     }

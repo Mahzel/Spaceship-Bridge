@@ -573,7 +573,7 @@ public class DevHud : MonoBehaviour
 
             string rng = "-";
             bool rngBad = false;
-            RangeEstimate est = TrackManager.BestRange(tr, now);
+            RangeEstimate est = TrackManager.BestRange(tr, now, Game.State.Ship.x, Game.State.Ship.z);
             if (est.valid)
             {
                 double e = est.range / GameConstants.GAME_UNITS_PER_UA, s = est.rangeSigma / GameConstants.GAME_UNITS_PER_UA;

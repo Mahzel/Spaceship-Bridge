@@ -358,7 +358,7 @@ public sealed class TrackManager
                 if (TrackConfirmed != null) TrackConfirmed(tr);
             }
         }
-        tr.range = BestRange(tr, time);
+        tr.range = BestRange(tr, time, shipX, shipZ);
         if (Changed != null) Changed();
     }
 
@@ -446,7 +446,7 @@ public sealed class TrackManager
 
         // A radar fix keeps ageing between hits, so re-pick the best range for every track, not just the hit ones.
         for (int ti = 0; ti < _tracks.Count; ti++)
-            _tracks[ti].range = BestRange(_tracks[ti], time);
+            _tracks[ti].range = BestRange(_tracks[ti], time, shipX, shipZ);
 
         // Status changes only — nothing here is ever auto-removed anymore. Every track exists because the
         // player marked it; only Drop() (the player's own button) takes one away.
@@ -532,7 +532,7 @@ public sealed class TrackManager
         tr.radarFixTime = time;
         tr.hasRadarRate = hasRate;
         tr.radarRangeRateKmS = hasRate ? rangeRateKmS : 0.0;
-        tr.range = BestRange(tr, time);
+        tr.range = BestRange(tr, time, shipX, shipZ);
         if (Changed != null) Changed();
     }
 
@@ -560,16 +560,31 @@ public sealed class TrackManager
     }
 
     /// <summary>Picks whichever of TMA and the aged radar fix is tighter. TMA only counts once it's actually
-    /// observable (post-manoeuvre); before that its "sigma" is just a number from an unconstrained fit.</summary>
-    public static RangeEstimate BestRange(Track tr, double time)
+    /// observable (post-manoeuvre); before that its "sigma" is just a number from an unconstrained fit.
+    /// While the track is ACTIVELY locked (a hit this exact update, not coasting on a miss), the bearing is
+    /// essentially exact right now - the returned estimate's (x, z) is pinned onto that ray at whatever range
+    /// the fit/fusion above produced, rather than trusting a fitted or coasted position that can drift off the
+    /// true bearing over a big time-warp jump between updates (a genuinely orbiting target's own curvature
+    /// breaks any straight-line/single-fit extrapolation increasingly with elapsed time). Range and velocity
+    /// are left as-is: bearing is the one quantity that's actually measured fresh every line.</summary>
+    public static RangeEstimate BestRange(Track tr, double time, double shipX, double shipZ)
     {
         RangeEstimate radar = AgedRadarFix(tr, time);
         RangeEstimate tma = tr.tmaRange;
         bool tmaOk = tma.Observable;
 
-        if (radar.valid && tmaOk) return radar.rangeSigma <= tma.rangeSigma ? radar : tma;
-        if (radar.valid) return radar;
-        return tma; // may itself be invalid / unobservable: callers check Observable
+        RangeEstimate best;
+        if (radar.valid && tmaOk) best = radar.rangeSigma <= tma.rangeSigma ? radar : tma;
+        else if (radar.valid) best = radar;
+        else best = tma; // may itself be invalid / unobservable: callers check Observable
+
+        if (best.valid && tr.status == TrackStatus.Confirmed && tr.consecutiveMisses == 0)
+        {
+            double rad = tr.bearing * Math.PI / 180.0;
+            best.x = shipX + best.range * Math.Sin(rad);
+            best.z = shipZ + best.range * Math.Cos(rad);
+        }
+        return best;
     }
 
     // ---------------------------------------------------------------------
@@ -753,7 +768,7 @@ public sealed class TrackManager
         FitRate(tr);
         if (tr.status == TrackStatus.Confirmed || tr.hits >= ConfirmHits)
             tr.tmaRange = RangeEstimator.Estimate(tr.history);
-        tr.range = BestRange(tr, time);
+        tr.range = BestRange(tr, time, shipX, shipZ);
         if (d.elevationSigmaDeg > 0f)
             ApplyElevation(tr, time, d.elevationDeg, d.elevationSigmaDeg, ElevationSource.Waterfall);
     }

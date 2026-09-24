@@ -574,3 +574,34 @@ mechanics, not just a straight-line coast that only stays honest briefly. Stubs 
 a long raw recording's RECALL eventually offering "determined orbit" instead of "rough, aged fix" once
 `OrbitFit` converges; and that an orbit-based recall's predicted bearing actually tracks a body correctly
 across a real time skip (warp forward, then RECALL again and see if the new prediction still points at it).
+
+## Progress (this session - a locked track's position can no longer drift off its own measured bearing)
+
+User-reported, with screenshots: NAV plotted the Moon roughly 60 degrees away from its true position after a
+time-warp jump, while the waterfall's own bearing line for it barely moved and stayed accurate throughout -
+the track was never lost, so nothing should have been free to drift that far. Root cause: `TrackManager.
+BestRange` returns whichever of TMA's fit or the (now velocity-aware, see the radar-into-the-orbit-solver
+entry above) aged radar fix has the tighter sigma, and NEITHER of those `(x, z)` points was ever checked
+against the track's own CURRENT measured bearing - a straight-line coast (radar) or a fit off noisy history
+(TMA) can end up pointing somewhere the sensor plainly isn't looking anymore, especially over a big warp jump,
+since a genuinely orbiting target's real curvature breaks any straight-line extrapolation more the longer it
+runs. The bearing itself is about the one thing measured fresh and essentially exactly every line; nothing
+was using that fact to keep the position estimate honest.
+
+Fixed directly per the user's own framing ("constrain bearing/ranges to measured values ... should not allow
+such deviation while the contact is tracked"): `BestRange` now takes the ship's position and, whenever the
+track is ACTIVELY locked (`Confirmed`, `consecutiveMisses == 0` - a hit landed this exact update, not
+coasting on a miss), pins the returned estimate's `(x, z)` onto the ray from the ship at the track's live
+`bearing`, at whatever range magnitude the fit/fusion produced. Range and velocity are left alone - bearing is
+the one quantity actually being re-measured every line, so it's the one worth trusting absolutely while the
+lock holds. Between hits (miss-coasting, or a lost/searching track) the pin doesn't reapply, so any drift is
+now capped at "since the last hit", not compounded across an entire warp session.
+
+`BestRange` gained `shipX`/`shipZ` parameters; all 6 call sites (5 in `TrackManager` itself, `DevHud`'s debug
+overlay) updated to pass them through - every one of them already had the ship's position in scope or (DevHud,
+a dev-only tool) reads it straight from `Game.State.Ship`.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Worth a specific in-Editor repro of the
+exact reported scenario: lock a nearby body (Moon-from-Earth-orbit is the given repro), warp forward hard, and
+confirm the NAV marker/TARGET ORBIT stay consistent with the waterfall's own bearing line throughout, not just
+immediately after a hit.

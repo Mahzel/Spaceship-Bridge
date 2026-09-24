@@ -7,6 +7,14 @@ public class WaterfallSpec : SensorSpec
     [Min(0.1f)] public float apertureMeters   = 70f;
     [Min(0.001f)] public float wavelengthMeters = 1f;
 
+    [Header("Elevation fan")]
+    [Tooltip("Half-power half-width of the receive fan in elevation, degrees. The array hears all 360 degrees " +
+             "of bearing but only a band of elevation around where it is tilted: a source this far off the tilt " +
+             "arrives at half power, twice as far at 1/16.")]
+    [Range(1f, 90f)] public float fanHalfWidthElDeg = 15f;
+    [Tooltip("Mechanical tilt limits of the fan, degrees (+ = up).")]
+    [Range(0f, 90f)] public float maxTiltDeg = 80f;
+
     [Header("Processing")]
     [Min(8)] public int maxBins = 2048;
     [Min(1)] public int maxIntegration = 5;
@@ -39,6 +47,9 @@ public class WaterfallSpec : SensorSpec
 
     /// <summary>Integrating N lines improves SNR by sqrt(N).</summary>
     public float SnrGain(int n) => Mathf.Sqrt(Mathf.Max(1, n));
+
+    /// <summary>1-sigma elevation a detection implies: the fan says "somewhere in here", nothing finer.</summary>
+    public float ElevationSigmaDeg => 0.6f * fanHalfWidthElDeg;
 
     /// <summary>Weakest signal that crosses the detection threshold after integrating N lines.</summary>
     public float MinDetectableSignal(int n) => detectionThresholdSigma * noiseSigma / SnrGain(n);

@@ -10,6 +10,8 @@ public sealed class DebriefScreen
 {
     private GameObject _root;
     private TextMeshProUGUI _run, _cause, _duration, _data, _tx, _gasp, _returned, _total;
+    private TextMeshProUGUI _review, _trust, _changes;
+    private const int MaxChangeLines = 8;
 
     public void Build(Transform parent)
     {
@@ -41,11 +43,18 @@ public sealed class DebriefScreen
         _gasp     = UIKit.AddLabel(prt, "", t.fontSizeBody, t.warning, TextAlignmentOptions.Center);
         _returned = UIKit.AddLabel(prt, "", t.fontSizeBody, t.text,    TextAlignmentOptions.Center);
         _total    = UIKit.AddLabel(prt, "", t.fontSizeTitle, t.good,    TextAlignmentOptions.Center);
+        UIKit.AddSpacer(prt, 8f);
+        _review   = UIKit.AddLabel(prt, "", t.fontSizeBody, t.textDim, TextAlignmentOptions.Center);
+        _trust    = UIKit.AddLabel(prt, "", t.fontSizeBody, t.text,    TextAlignmentOptions.Center);
+        _changes  = UIKit.AddLabel(prt, "", t.fontSizeSmall, t.textDim, TextAlignmentOptions.Center);
+        _changes.textWrappingMode = TextWrappingModes.Normal;
+        _changes.richText = true;
         UIKit.AddSpacer(prt, 16f);
         UIKit.AddButton(prt, Loc.Get("debrief.relaunch"), () =>
         {
-            if (Game.Run != null) Game.Run.BeginRun();
+            if (Game.Run != null) Game.Run.BeginRefit(); // choose the next probe's loadout, then launch
         }, 0f, 52f);
+        UIKit.AddButton(prt, Loc.Get("menu.mainmenu"), Game.ReturnToMainMenu, 0f, 40f);
 
         _root.SetActive(false);
     }
@@ -68,5 +77,23 @@ public sealed class DebriefScreen
         UIKit.SetText(_gasp, s.lastGaspRecords > 0 ? Loc.Get("debrief.gasp", s.lastGaspRecords) : "");
         UIKit.SetText(_returned, s.cause == RunEndCause.ReturnedHome ? Loc.Get("debrief.returned", s.returnedValue) : "");
         UIKit.SetText(_total, Loc.Get("debrief.total", s.totalValue));
+
+        UITheme t = UITheme.Current;
+        UIKit.SetText(_review, Loc.Get("debrief.review", s.entriesReviewed, s.entriesDisputed, s.entriesCorrected));
+        float dt = s.trustAfter - s.trustBefore;
+        UIKit.SetText(_trust, Loc.Get("debrief.trust", s.trustBefore, s.trustAfter, dt));
+        _trust.color = dt >= 0f ? t.good : t.danger;
+        var sb = new System.Text.StringBuilder();
+        int shown = 0;
+        if (s.trustChanges != null)
+            foreach (TrustChange c in s.trustChanges)
+            {
+                if (shown == MaxChangeLines) { sb.Append("\n..."); break; }
+                if (shown > 0) sb.Append('\n');
+                string hex = ColorUtility.ToHtmlStringRGB(c.delta >= 0f ? t.good : t.danger);
+                sb.Append("<color=#").Append(hex).Append('>').Append(Loc.Get("debrief.change", c.delta, c.reason)).Append("</color>");
+                shown++;
+            }
+        UIKit.SetText(_changes, sb.ToString());
     }
 }

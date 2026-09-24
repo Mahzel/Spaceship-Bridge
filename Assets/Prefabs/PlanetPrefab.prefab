@@ -42,7 +42,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 2758926297277098843}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: cfd560f66a20c2b46b92074ea6505d78, type: 3}
+  m_Script: {fileID: 11500000, guid: fd8914d64be6cf44c950d7ee1b6a3378, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CelestialBody
   azimuth: 0

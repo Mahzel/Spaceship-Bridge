@@ -50,6 +50,11 @@ public sealed class SystemData
     public float shipDistance;
     public float shipAzimuthRad;
 
+    /// <summary>If >= 0, the probe instead starts in a circular parking orbit of startOrbitRadiusGame around this
+    /// node (the home system: Earth). See SystemManager.PlacePlayerShip.</summary>
+    public int   startNode = -1;
+    public float startOrbitRadiusGame;
+
     public SystemData(string id, int seed)
     {
         this.id   = id;

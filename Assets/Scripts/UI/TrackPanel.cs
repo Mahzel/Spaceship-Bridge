@@ -107,9 +107,13 @@ public sealed class TrackPanel
         if (Game.State != null) Game.State.Tracks.PendingName = value == null ? "" : value.Trim();
     }
 
+    /// <summary>Click selects; clicking the already-selected track deselects it (so the next waterfall click
+    /// creates a new track instead of moving this one).</summary>
     private static void Select(Row row)
     {
-        if (Game.State != null) Game.State.Tracks.SelectedId = row.trackId;
+        if (Game.State == null) return;
+        TrackManager tm = Game.State.Tracks;
+        tm.SelectedId = tm.SelectedId == row.trackId ? 0 : row.trackId;
     }
 
     private static void Drop(Row row)
@@ -163,7 +167,12 @@ public sealed class TrackPanel
             UIKit.SetButtonActive(r.name, tr.id == tm.SelectedId);
             UIKit.SetText(r.bearing, Loc.Get("ui.track.bearing", tr.bearing));
             UIKit.SetText(r.rate, tr.hasRate ? Loc.Get("ui.track.rate", tr.rateDegPerDay) : Loc.Get("ui.track.norate"));
-            UIKit.SetText(r.quality, locked ? Loc.Get("ui.track.quality", tr.quality * 100f) : Loc.Get("ui.track.searching"));
+            // HOLD: the waterfall is currently missing it, but the imager/radar confirmed it recently.
+            double now = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
+            bool held = locked && tr.consecutiveMisses > 0 && now < tr.supportHoldUntil;
+            if (!locked) UIKit.SetText(r.quality, Loc.Get("ui.track.searching"));
+            else if (held) UIKit.SetText(r.quality, Loc.Get(tr.lastSupport == ElevationSource.Imager ? "ui.track.hold.img" : "ui.track.hold.rad"));
+            else UIKit.SetText(r.quality, Loc.Get("ui.track.quality", tr.quality * 100f));
 
             RangeEstimate re = tr.range;
             if (locked && re.Observable)

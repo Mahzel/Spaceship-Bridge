@@ -53,9 +53,9 @@ public class SystemManager : MonoBehaviour
 
     private void Start()
     {
-        // The first run starts here; its launch request jumps to the home system.
-        if (Game.Run != null) Game.Run.BeginRun();
-        else                  JumpToNewSystem();
+        // The first run no longer starts here: the main menu's NEW GAME does it (Game.NewGame), and its launch
+        // request jumps to the home system. Without the Game services (a bare test scene), spawn something.
+        if (Game.Run == null) JumpToNewSystem();
     }
 
     private void OnDestroy()
@@ -214,6 +214,13 @@ public class SystemManager : MonoBehaviour
     }
     #endregion
 
+    /// <summary>The spawned transform of node `index` of CurrentData (null if out of range). Dev tools only:
+    /// gameplay code must go through tracks and SensorSight, never through the node list.</summary>
+    public Transform NodeTransform(int index)
+    {
+        return index >= 0 && index < _nodeTransforms.Count ? _nodeTransforms[index] : null;
+    }
+
     // =========================================================================
     #region Runtime
     /// <summary>Sets every node's world position for the given simulated time (parents first).</summary>
@@ -239,6 +246,8 @@ public class SystemManager : MonoBehaviour
         // The probe arrives facing the system origin, already in a stable circular parking orbit around
         // whatever it lands nearest to - under real gravity (see ShipOrbit) a ship placed at rest would
         // just fall straight into it, so "at rest" no longer makes sense once orbits are simulated for real.
+        if (data.startNode >= 0 && Game.State != null) { PlaceInParkingOrbit(data); MoveShip(); return; }
+
         Vector3 o = data.ShipOffset;
         double heading = Mathf.Atan2(-o.x, -o.z) * Mathf.Rad2Deg;
         if (Game.State != null)
@@ -250,6 +259,34 @@ public class SystemManager : MonoBehaviour
             Game.State.ShipOrbit.Reset(); // don't propagate across the jump on the next MoveShip() tick
         }
         MoveShip();
+    }
+
+    /// <summary>
+    /// Home-system start: a circular parking orbit of startOrbitRadiusGame around startNode (Earth), placed on
+    /// the night side (away from the system origin) in the ecliptic plane, moving prograde, facing the Sun.
+    /// The ship's state is built in double precision from the body's analytic state.
+    /// </summary>
+    private void PlaceInParkingOrbit(SystemData data)
+    {
+        double simNow = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
+        OrbitalMechanics.NodeState(data, data.startNode, simNow, out Vec3d bodyPos, out Vec3d bodyVel);
+
+        Vec3d outward = new Vec3d(bodyPos.x, 0.0, bodyPos.z);
+        outward = outward.Magnitude > 1e-9 ? outward.Normalized : new Vec3d(1, 0, 0);
+        double r = data.startOrbitRadiusGame;
+        Vec3d pos = bodyPos + outward * r;
+
+        double mu = OrbitalMechanics.Mu(OrbitalMechanics.MassOf(data, data.startNode));
+        double speed = System.Math.Sqrt(mu / r);
+        // Same sense as CircularVelocityKmS: Cross(up, radial).
+        Vec3d tangent = Vec3d.Cross(new Vec3d(0, 1, 0), outward).Normalized * speed;
+        Vec3d vel = (bodyVel + tangent) * ShipState.KmPerUnit;
+
+        double heading = System.Math.Atan2(-pos.x, -pos.z) * Mathf.Rad2Deg;
+        ShipState ship = Game.State.Ship;
+        ship.Place(pos.x, pos.y, pos.z, heading);
+        ship.vx = vel.x; ship.vy = vel.y; ship.vz = vel.z;
+        Game.State.ShipOrbit.Reset();
     }
 
     /// <summary>Advances the ship along its real orbit (see ShipOrbit) for this frame's simulated time,

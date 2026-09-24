@@ -17,5 +17,5 @@ MonoBehaviour:
   locKey: 
   powerDraw: 1
   wavelengthMin: 380
-  wavelengthMax: 780
+  wavelengthMax: 800
   resolvingPower: 200

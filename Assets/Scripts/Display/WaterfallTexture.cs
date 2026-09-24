@@ -30,7 +30,7 @@ public sealed class WaterfallTexture
         Texture = new Texture2D(Width, Height, TextureFormat.RGBA32, false)
         {
             filterMode = FilterMode.Point,   // crisp bins
-            wrapModeU  = TextureWrapMode.Clamp,
+            wrapModeU  = TextureWrapMode.Repeat, // bearing wraps at +/-180: a zoomed view may straddle it
             wrapModeV  = TextureWrapMode.Repeat, // needed for the ring-buffer scroll
             name       = "WaterfallTexture"
         };

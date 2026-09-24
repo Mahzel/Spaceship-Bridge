@@ -16,6 +16,7 @@ using UnityEngine;
 /// </summary>
 public sealed class ManeuverPlan
 {
+    [System.Serializable]
     public struct Node
     {
         public double simSeconds;
@@ -42,6 +43,15 @@ public sealed class ManeuverPlan
 
     /// <summary>Clears the queue and cancels any warp-to-node in progress. Call on a system jump/new run,
     /// same as ShipOrbit.Reset() - a node planned in the old system means nothing in the new one.</summary>
+    public IList<Node> QueueForSave => _queue;
+
+    /// <summary>Save/load: the queued burns as they were saved.</summary>
+    public void Restore(IList<Node> nodes)
+    {
+        Clear();
+        _queue.AddRange(nodes);
+    }
+
     public void Clear()
     {
         _queue.Clear();
@@ -124,10 +134,9 @@ public sealed class ManeuverPlan
         if (sm == null || sm.CurrentData == null || state == null) return;
 
         ShipOrbit orbit = state.ShipOrbit;
-        if (!orbit.Valid) return;
-
-        Vector3 relPos = KeplerOrbit.OffsetAt(orbit.Elements, simSeconds);
-        Vector3 relVel = OrbitalMechanics.VelocityAt(orbit.Elements, simSeconds);
+        // Burn directions come from the ship's own double-precision conic (bound or not), not from the
+        // float display elements.
+        if (!orbit.RelativeStateAt(simSeconds, out Vector3 relPos, out Vector3 relVel)) return;
         Vector3 progradeDir = ProgradeDir(relVel);
         Vector3 normalDir   = NormalDir(relPos, relVel);
 
@@ -165,10 +174,8 @@ public sealed class ManeuverPlan
     public static Preview PreviewNode(double simSeconds, float progradeKmS, float normalKmS)
     {
         ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
-        if (orbit == null || !orbit.Valid) return default;
-
-        Vector3 relPos = KeplerOrbit.OffsetAt(orbit.Elements, simSeconds);
-        Vector3 relVel = OrbitalMechanics.VelocityAt(orbit.Elements, simSeconds);
+        if (orbit == null) return default;
+        if (!orbit.RelativeStateAt(simSeconds, out Vector3 relPos, out Vector3 relVel)) return default;
         Vector3 progradeDir = ProgradeDir(relVel);
         Vector3 normalDir   = NormalDir(relPos, relVel);
 

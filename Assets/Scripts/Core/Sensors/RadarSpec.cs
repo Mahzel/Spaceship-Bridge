@@ -2,8 +2,8 @@ using UnityEngine;
 
 /// <summary>
 /// Active sensor: fires a ranging ping and waits for the echo, unlike every other sensor here which only
-/// listens. Two modes (see RadarProcessor): a wide, coarse SWEEP (free-aim, adjustable beam half-width, no
-/// identity — just "something's out there, this far away") and a narrow TRACK-locked Doppler ping (fixed tiny
+/// listens. Two modes (see RadarProcessor): a SWEEP over a free-aimed sector that returns a bearing/range blip
+/// per contact (no identity; the player can mark a blip as a track) and a narrow TRACK-locked Doppler ping (fixed tiny
 /// beam, aimed at an existing track's current bearing, returns a near-exact range AND a radial velocity
 /// reading — a real alternative to bearing-only TMA, which needs a manoeuvre to collapse its range sigma).
 /// </summary>
@@ -13,6 +13,13 @@ public class RadarSpec : SensorSpec
     [Header("Sweep mode — free-aim, adjustable beam half-width (degrees)")]
     [Min(1f)] public float sweepBeamMinDeg = 10f;
     [Min(1f)] public float sweepBeamMaxDeg = 60f;
+
+    [Header("Elevation (degrees, + = up)")]
+    [Tooltip("Half-power half-width of the SWEEP beam in elevation. The sweep fans across the aimed bearing " +
+             "sector at the aimed elevation; a target this far off the aim elevation returns half the power.")]
+    [Min(0.1f)] public float sweepElevationHalfWidthDeg = 5f;
+    [Tooltip("Mechanical elevation limits of the antenna.")]
+    [Range(0f, 90f)] public float maxTiltDeg = 85f;
 
     [Header("Track mode — fixed narrow beam locked to a track's current bearing (degrees)")]
     [Min(0.01f)] public float trackBeamDeg = 0.1f;
@@ -29,6 +36,26 @@ public class RadarSpec : SensorSpec
              "system takes a perceptible handful of real seconds at warp x1, and — because the wait is counted " +
              "in simulated seconds — scales down with warp like every other timed event in the sim.")]
     [Min(0.1f)] public float pingSpeedAuPerDay = 10f;
+
+    [Header("Sweep processing — bearing x range grid, CFAR, same pattern as the waterfall")]
+    [Tooltip("Angular size of one sweep beam cell. A return's bearing is only known to within about this, " +
+             "refined by interpolating between neighbouring cells.")]
+    [Min(0.1f)] public float sweepCellDeg = 1f;
+    [Tooltip("Range bins across the selected display range. Two contacts closer in range than one bin (and in " +
+             "the same cell) merge into a single return.")]
+    [Min(32)] public int rangeBins = 512;
+    [Tooltip("Selectable instrumented ranges, AU. Shorter = finer range bins and a shorter listen window.")]
+    public float[] rangeScalesAu = { 5f, 20f, 60f, 200f };
+    [Tooltip("CFAR threshold, in noise sigmas (the noise estimate comes from a short window, so its tails are " +
+             "fatter than a pure Gaussian). At 5.0 a 60-degree sweep gives about one false return every three " +
+             "pings; 4.2 gives about three per ping.")]
+    [Min(1f)] public float detectionThresholdSigma = 5f;
+    [Tooltip("SNR of an Earth-sized, albedo-0.3 body at referenceRangeAu. Echo power falls as 1/R^4 and " +
+             "scales with cross-section (radius^2 x albedo).")]
+    [Min(0.1f)] public float referenceSnr = 40f;
+    [Min(0.01f)] public float referenceRangeAu = 10f;
+    [Tooltip("How long a sweep return stays on the scope, in SIMULATED days, fading as it ages.")]
+    [Min(0.1f)] public float returnPersistenceDays = 20f;
 
     [Header("Precision (track mode)")]
     [Tooltip("Range sigma reported as this fraction of the measured range — near-exact, but not literally perfect.")]

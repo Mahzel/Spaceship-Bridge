@@ -275,7 +275,7 @@ public static class GameConstants
     public const float SPECTRUM_WAVELENGTH_MIN = 380f;
 
     /// <summary>Visible spectrum maximum wavelength (nm).</summary>
-    public const float SPECTRUM_WAVELENGTH_MAX = 780f;
+    public const float SPECTRUM_WAVELENGTH_MAX = 800f; // up to 800: the CO2 bands Venus was first found by (782, 788 nm)
 
     #endregion
 }

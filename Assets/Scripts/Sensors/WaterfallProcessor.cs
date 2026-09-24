@@ -18,6 +18,15 @@ public sealed class WaterfallProcessor
     public bool Enabled = true;
     public bool IntegrationOn = true;
 
+    private float _aimElevationDeg;
+    /// <summary>Tilt of the elevation fan, degrees (+ up), clamped to the spec's mechanical limits. Every bearing
+    /// is still heard; a source's power is weighted by its elevation offset from this (SensorSight.BeamGain).</summary>
+    public float AimElevationDeg
+    {
+        get { return _aimElevationDeg; }
+        set { float m = spec != null ? spec.maxTiltDeg : 80f; _aimElevationDeg = Mathf.Clamp(value, -m, m); }
+    }
+
     private readonly List<float[]> _integrator = new List<float[]>();
     private readonly List<Detection> _detections = new List<Detection>();
     private float[] _score;
@@ -87,6 +96,12 @@ public sealed class WaterfallProcessor
         return false; // older than the whole buffered window
     }
 
+    /// <summary>Sim time of the oldest row still in the buffer (-inf while the buffer isn't full yet).</summary>
+    public double OldestRowTime
+    {
+        get { return _rowTime != null && _rowCount > 0 ? _rowTime[_headMirror] : double.NegativeInfinity; }
+    }
+
     private void RecordRowTime(double simTime)
     {
         _rowTime[_headMirror] = simTime;
@@ -98,6 +113,9 @@ public sealed class WaterfallProcessor
     {
         if (!Enabled || spec == null) return;
         if (Game.Run == null || Game.Run.Phase != RunPhase.Flight) return;
+        // Paused: the image freezes. Lines generated now would all carry the same sim time (and burn noise
+        // into the history for nothing); the bank is kept, so the cadence resumes where it stopped.
+        if (Game.Clock != null && Game.Clock.Paused) return;
 
         float warp = Game.Clock != null ? Mathf.Max(1f, Game.Clock.WarpFactor) : 1f;
         float wait = Mathf.Max(spec.minUpdateInterval, spec.lineIntervalSeconds / warp);
@@ -122,13 +140,15 @@ public sealed class WaterfallProcessor
         for (int i = 0; i < baseNoise.Length; i++)
             baseNoise[i] = GaussianNoise(0f, spec.noiseSigma);
 
-        CelestialBody[] bodies = UnityEngine.Object.FindObjectsByType<CelestialBody>(FindObjectsSortMode.None);
-        Transform ship = SystemManager.Current != null && SystemManager.Current.PlayerShip != null
-                       ? SystemManager.Current.PlayerShip.transform : null;
+        List<CelestialBody> bodies = SensorSight.AllBodies();
+        Transform ship = SensorSight.Ship();
+        float fan = spec.fanHalfWidthElDeg;
         foreach (CelestialBody body in bodies)
         {
-            float azimuth = ComputeAzimuth(body, ship);
-            SpreadSignal(baseNoise, azimuth, body.apparentLuminosity);
+            float azimuth = SensorSight.WorldAzimuth(body, ship);
+            float gain = SensorSight.BeamGain(SensorSight.WorldElevation(body, ship) - _aimElevationDeg, fan);
+            if (gain < 1e-4f) continue;
+            SpreadSignal(baseNoise, azimuth, body.apparentLuminosity * gain);
         }
 
         float[] average = SlidingAverage(baseNoise, GameConstants.CFAR_WINDOW, GameConstants.CFAR_GUARD);
@@ -172,25 +192,29 @@ public sealed class WaterfallProcessor
         if (_score == null || _score.Length != lineData.Length) _score = new float[lineData.Length];
         for (int i = 0; i < lineData.Length; i++) _score[i] = lineData[i] * gain;
 
-        // Bins already encode world bearing directly now (see ComputeAzimuth), so no heading offset here —
+        // Bins already encode world bearing directly now (see SensorSight.WorldAzimuth), so no heading offset here —
         // heading is still passed through to Tracks.Update below, purely as sample metadata.
         Detector.Detect(_score, spec.detectionThresholdSigma, spec.BeamwidthDeg, simTime, 0f, _detections);
+
+        // The fan doesn't resolve elevation: every detection is "around the tilt", with the fan's coarse sigma.
+        float elSigma = spec.ElevationSigmaDeg;
+        for (int i = 0; i < _detections.Count; i++)
+        {
+            Detection d = _detections[i];
+            d.elevationDeg = _aimElevationDeg;
+            d.elevationSigmaDeg = elSigma;
+            _detections[i] = d;
+        }
 
         float gateDeg = spec.gateBins * 360f / lineData.Length;
         ShipState ship = Game.State.Ship;
         Game.State.Tracks.Update(simTime, _detections, gateDeg, spec.maxTracks, spec.dropAfterMisses, ship.x, ship.z, heading);
+        Game.State.Data.OnSensorLine(simTime, Game.State.Tracks); // raw recordings grow per line recorded
     }
 
-    // World bearing (0 = +Z, clockwise-positive — same convention as ShipState.headingDeg), NOT ship-relative:
-    // the waterfall bins are laid out in this fixed frame, so a contact sits still in the image regardless of
-    // the ship's heading, and only the heading tick (drawn by TrackOverlay) sweeps across as the ship turns.
-    private static float ComputeAzimuth(CelestialBody body, Transform ship)
-    {
-        if (ship == null) return body.GetData().Az;
-
-        Vector3 rel = body.transform.position - ship.position;
-        return Vector3.SignedAngle(Vector3.forward, new Vector3(rel.x, 0f, rel.z), Vector3.up);
-    }
+    // Bearings come from SensorSight.WorldAzimuth: world frame (0 = +Z, clockwise-positive, same convention as
+    // ShipState.headingDeg), NOT ship-relative. The waterfall bins are laid out in this fixed frame, so a
+    // contact sits still in the image regardless of heading; only the heading tick (TrackOverlay) sweeps.
 
     private void SpreadSignal(float[] buffer, float azimuth, float signal)
     {

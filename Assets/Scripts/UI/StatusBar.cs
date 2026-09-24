@@ -15,11 +15,13 @@ public sealed class StatusBar
 
     private TextMeshProUGUI _runLine, _systemLine, _net;
     private UIBar _power, _hydrogen, _storage;
-    private Button _pause;
+    private Button _pause, _nav;
     private Button[] _warpMult;
     private Button[] _warpUnit;
 
-    public void Build(Transform parent)
+    /// <summary>Wired by GameUI (which owns the NavScreen instance) so this stays a plain click callback,
+    /// same as every other button here talking straight to Game.* statics.</summary>
+    public void Build(Transform parent, System.Action onNavToggle)
     {
         UITheme t = UITheme.Current;
 
@@ -54,6 +56,9 @@ public sealed class StatusBar
 
         UIKit.AddSpacer(rt, 0f, flexibleWidth: 1f);
 
+        // Nav (only shown once a nav computer is fitted; toggles NavScreen, owned by GameUI)
+        _nav = UIKit.AddButton(rt, Loc.Get("ui.nav.open"), () => onNavToggle?.Invoke(), 56f, 44f);
+
         // Pause + warp
         _pause = UIKit.AddButton(rt, Loc.Get("ui.pause"), () =>
         {
@@ -72,7 +77,8 @@ public sealed class StatusBar
             float mult = WarpMultipliers[i];
             _warpMult[i] = UIKit.AddButton(multRow, mult.ToString("F0"), () =>
             {
-                if (Game.Clock != null) Game.Clock.SetWarp(mult, Game.Clock.WarpUnitKind);
+                // Snap to the nearest ladder rung, so every button lands on a speed the hotkeys also step through.
+                if (Game.Clock != null) SetLadder(mult, Game.Clock.WarpUnitKind);
             }, 40f, 30f);
         }
 
@@ -84,9 +90,23 @@ public sealed class StatusBar
             GameClock.WarpUnit unit = WarpUnits[i];
             _warpUnit[i] = UIKit.AddButton(unitRow, WarpUnitLabels[i], () =>
             {
-                if (Game.Clock != null) Game.Clock.SetWarp(Game.Clock.WarpMultiplier, unit);
+                if (Game.Clock != null) SetLadder(Game.Clock.WarpMultiplier, unit);
             }, 40f, 30f);
         }
+    }
+
+    /// <summary>The ladder rung closest (in log speed) to mult x unit.</summary>
+    private static void SetLadder(float mult, GameClock.WarpUnit unit)
+    {
+        float want = Mathf.Log(Mathf.Max(1e-3f, mult * GameClock.UnitSeconds(unit)));
+        int best = 0; float bestD = float.MaxValue;
+        for (int i = 0; i < GameClock.WarpLadder.Length; i++)
+        {
+            var w = GameClock.WarpLadder[i];
+            float d = Mathf.Abs(Mathf.Log(w.mult * GameClock.UnitSeconds(w.unit)) - want);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        Game.Clock.SetWarpLadder(best);
     }
 
     public void Refresh()
@@ -100,7 +120,7 @@ public sealed class StatusBar
 
         string system = SystemManager.Current != null ? SystemManager.Current.CurrentSystemID : "-";
         UIKit.SetText(_runLine,    Loc.Get("ui.run", run.RunNumber, run.RunElapsedDays));
-        UIKit.SetText(_systemLine, Loc.Get("ui.system", system));
+        UIKit.SetText(_systemLine, Loc.Get("ui.system.trust", system, state.Trust));
 
         float p = state.PowerCapacity > 0f ? state.PowerStored / state.PowerCapacity : 0f;
         Color powerColor = p < 0.10f ? t.danger : p < 0.25f ? t.warning : t.accent;
@@ -116,9 +136,15 @@ public sealed class StatusBar
         UIKit.SetText(_net, Loc.Get("ui.net", net, run.SolarPerDay, run.LoadPerDay, run.ReactorPerDay));
         _net.color = net >= 0f ? t.good : t.warning;
 
+        _nav.gameObject.SetActive(NavTier.HasSystemView(state.Loadout.Level(ProbeSystem.NavComputer)));
+
         UIKit.SetButtonActive(_pause, clock.Paused);
         for (int i = 0; i < _warpMult.Length; i++)
+        {
             UIKit.SetButtonActive(_warpMult[i], !clock.Paused && Mathf.Approximately(clock.WarpMultiplier, WarpMultipliers[i]));
+            // x60 only exists in days: 60 s = 1 m, 60 m = 1 h (and 60 h would be 2.5 d).
+            _warpMult[i].interactable = WarpMultipliers[i] < 60f || clock.WarpUnitKind == GameClock.WarpUnit.Days;
+        }
         for (int i = 0; i < _warpUnit.Length; i++)
             UIKit.SetButtonActive(_warpUnit[i], !clock.Paused && clock.WarpUnitKind == WarpUnits[i]);
     }

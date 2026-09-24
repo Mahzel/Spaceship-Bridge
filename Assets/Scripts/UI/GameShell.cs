@@ -55,10 +55,20 @@ public sealed class GameShell
 
     private void BuildSidebar(Transform parent, UITheme t)
     {
-        Image sideImg = UIKit.AddPanel(parent, "Sidebar", t.panelColor);
-        RectTransform side = sideImg.rectTransform;
+        // Outer node: ONLY a LayoutElement, so Row's HorizontalLayoutGroup reads a clean, unambiguous 160px
+        // preferredWidth from it. A VerticalLayoutGroup on the SAME node (as this used to be) also implements
+        // ILayoutElement and reports ITS OWN preferred width back up to Row (based on its children's sizes),
+        // which silently overrode the fixed 160px - that's what actually ballooned the sidebar, not
+        // expandWidth. The VStack (for the mode buttons) goes on a separate Stretch-filled child instead, the
+        // same way every major mode's own content panel already avoids this by building into a Content child
+        // rather than putting a LayoutGroup directly on a Size-constrained node.
+        RectTransform side = UIKit.Node("Sidebar", parent);
         UIKit.Size(side, preferredWidth: 160f, flexibleHeight: 1f);
-        var sideV = UIKit.VStack(side, 6f, (int)t.padding);
+
+        Image sideImg = UIKit.AddPanel(side, "Bg", t.panelColor);
+        RectTransform inner = sideImg.rectTransform;
+        UIKit.Stretch(inner);
+        var sideV = UIKit.VStack(inner, 6f, (int)t.padding);
         sideV.childAlignment = TextAnchor.UpperLeft;
 
         string[] labels =
@@ -70,7 +80,7 @@ public sealed class GameShell
         for (int i = 0; i < labels.Length; i++)
         {
             int idx = i; // capture
-            _modeButtons[i] = UIKit.AddButton(side, labels[i], () => SetMode(idx), 0f, 44f);
+            _modeButtons[i] = UIKit.AddButton(inner, labels[i], () => SetMode(idx), 0f, 44f);
         }
     }
 

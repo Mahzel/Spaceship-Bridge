@@ -86,15 +86,21 @@ public sealed class NavScreen
         _notFitted.textWrappingMode = TextWrappingModes.Normal;
         UIKit.Size(_notFitted.rectTransform, preferredWidth: 800f);
 
+        // Outer node: ONLY a LayoutElement, same decoupling as BuildSidebar below (see its comment) - the
+        // HStack that actually arranges Map+Sidebar goes on a separate Stretch-filled child, not this node,
+        // so it can't report its own children-derived size back up to prt's VStack.
         RectTransform body = UIKit.Node("Body", prt);
         UIKit.Size(body, flexibleWidth: 1f, flexibleHeight: 1f);
+
+        RectTransform bodyInner = UIKit.Node("Inner", body);
+        UIKit.Stretch(bodyInner);
         // expandWidth: false - the sidebar is a fixed 340px, not an equal partner to split space with the
         // map; see GameShell's identical fix for why expandWidth:true would balloon it.
-        var bodyH = UIKit.HStack(body, t.spacing * 2f, 0, expandWidth: false);
+        var bodyH = UIKit.HStack(bodyInner, t.spacing * 2f, 0, expandWidth: false);
         bodyH.childAlignment = TextAnchor.UpperLeft;
 
-        BuildMap(body);
-        BuildSidebar(body, t);
+        BuildMap(bodyInner);
+        BuildSidebar(bodyInner, t);
 
         return prt.gameObject;
     }
@@ -134,38 +140,45 @@ public sealed class NavScreen
 
     private void BuildSidebar(Transform parent, UITheme t)
     {
+        // Outer node: ONLY a LayoutElement (see GameShell.BuildSidebar's identical fix for why) - the VStack
+        // that actually arranges the readouts/buttons goes on a separate Stretch-filled child instead of
+        // this same node, so it can't report its own children-derived width back up to Body and override the
+        // fixed 340px.
         RectTransform side = UIKit.Node("Sidebar", parent);
         UIKit.Size(side, preferredWidth: 340f);
-        var v = UIKit.VStack(side, t.spacing, 0);
+
+        RectTransform inner = UIKit.Node("Inner", side);
+        UIKit.Stretch(inner);
+        var v = UIKit.VStack(inner, t.spacing, 0);
         v.childAlignment = TextAnchor.UpperLeft;
 
-        _incl = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
+        _incl = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.text);
 
-        _dialRect = UIKit.Node("InclDial", side);
+        _dialRect = UIKit.Node("InclDial", inner);
         UIKit.Size(_dialRect, preferredWidth: 300f, minHeight: 160f);
         _dial = _dialRect.gameObject.AddComponent<MapCanvas>();
 
-        UIKit.AddSpacer(side, 6f);
-        RectTransform zoomRow = UIKit.Node("Zoom", side);
+        UIKit.AddSpacer(inner, 6f);
+        RectTransform zoomRow = UIKit.Node("Zoom", inner);
         UIKit.HStack(zoomRow, 6f, 0, expandWidth: true);
         _zoomOut = UIKit.AddButton(zoomRow, Loc.Get("ui.nav.zoomout"), () => Zoom(1f / ZoomStep), 0f, 34f);
         _zoomIn  = UIKit.AddButton(zoomRow, Loc.Get("ui.nav.zoomin"),  () => Zoom(ZoomStep), 0f, 34f);
 
-        UIKit.AddSpacer(side, 6f);
-        RectTransform layerRow = UIKit.Node("Layers", side);
+        UIKit.AddSpacer(inner, 6f);
+        RectTransform layerRow = UIKit.Node("Layers", inner);
         UIKit.HStack(layerRow, 6f, 0, expandWidth: true);
         _layerCatalogue = UIKit.AddButton(layerRow, Loc.Get("ui.nav.layer.catalogue"), ToggleCatalogue, 0f, 34f);
         _layerTracks    = UIKit.AddButton(layerRow, Loc.Get("ui.nav.layer.tracks"),    ToggleTracks,    0f, 34f);
         UIKit.SetButtonActive(_layerCatalogue, _showCatalogue);
         UIKit.SetButtonActive(_layerTracks, _showTracks);
 
-        UIKit.AddSpacer(side, 6f);
-        _transferHeader = UIKit.AddLabel(side, Loc.Get("ui.nav.transfer.header"), t.fontSizeBody, t.accent);
-        _transferTarget = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
-        _transferPhase  = UIKit.AddLabel(side, "", t.fontSizeSmall, t.textDim);
-        _transferWindow = UIKit.AddLabel(side, "", t.fontSizeSmall, t.textDim);
-        _transferDv     = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
-        _transferButton = UIKit.AddButton(side, Loc.Get("ui.nav.transfer.create"), CreateTransferNodes, 0f, 34f);
+        UIKit.AddSpacer(inner, 6f);
+        _transferHeader = UIKit.AddLabel(inner, Loc.Get("ui.nav.transfer.header"), t.fontSizeBody, t.accent);
+        _transferTarget = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.text);
+        _transferPhase  = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.textDim);
+        _transferWindow = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.textDim);
+        _transferDv     = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.text);
+        _transferButton = UIKit.AddButton(inner, Loc.Get("ui.nav.transfer.create"), CreateTransferNodes, 0f, 34f);
 
         // Marker labels: a fixed handful, positioned over the map each redraw. No label-declutter yet
         // (handoff item 1 note) - fine at this vertex count (primary, ship, Pe, Ap, AN, DN).

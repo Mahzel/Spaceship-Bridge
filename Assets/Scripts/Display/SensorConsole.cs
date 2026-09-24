@@ -9,15 +9,16 @@ using UnityEngine.UI;
 /// and keep working (and, for Waterfall, drawing power) while hidden; Imager and Spectrometer are deliberate,
 /// aimed reads and stop (Hide()) when you look away, the same way they always have.
 ///
-/// This is a plain class, not a MonoBehaviour, matching every sub-screen it owns; GameUI builds one and calls
-/// Build/Refresh, the same way it drives SystemsDock.
+/// This is a plain class, not a MonoBehaviour, matching every sub-screen it owns. Fills the content rect
+/// GameShell gives it for the SENSORS major mode (UI shell rework) - Build() no longer owns its own
+/// background position/size or drag handle, GameShell does.
 /// </summary>
 public sealed class SensorConsole
 {
     private readonly WaterfallScreen _waterfall = new WaterfallScreen();
     private readonly ImagerScreen _imager = new ImagerScreen();
     private readonly SpectrometerScreen _spectrometer = new SpectrometerScreen();
-    private readonly SystemScreen _system = new SystemScreen();
+    private readonly ContactsScreen _system = new ContactsScreen();
     private readonly RadarScreen _radar = new RadarScreen();
 
     private GameObject[] _bodies;
@@ -35,18 +36,15 @@ public sealed class SensorConsole
     {
         UITheme t = UITheme.Current;
 
+        // Fills whatever content rect the Sensors major mode is given (GameShell) - no longer an absolute-
+        // anchored, auto-sized, draggable floating window.
         Image panel = UIKit.AddPanel(parent, "SensorConsole", t.panelColor);
         panel.raycastTarget = true;
         RectTransform prt = panel.rectTransform;
-        prt.anchorMin = prt.anchorMax = prt.pivot = new Vector2(1f, 0f);
-        prt.anchoredPosition = new Vector2(-8f, 8f);
-        prt.sizeDelta = new Vector2(920f, 0f);
+        UIKit.Stretch(prt);
 
         var v = UIKit.VStack(prt, t.spacing, (int)t.padding);
         v.childAlignment = TextAnchor.UpperLeft;
-        var fit = prt.gameObject.AddComponent<ContentSizeFitter>();
-        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fit.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
         RectTransform tabRow = UIKit.Node("Modes", prt);
         UIKit.HStack(tabRow, 4f, 0, expandWidth: true);
@@ -80,7 +78,6 @@ public sealed class SensorConsole
         try { start = PlayerPrefs.GetInt(PrefKey, 0); } catch (System.Exception) { }
         SetActive(Mathf.Clamp(start, 0, _bodies.Length - 1));
 
-        DraggablePanel.Attach(prt, "sensors");
         return prt.gameObject;
     }
 

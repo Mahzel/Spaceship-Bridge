@@ -19,8 +19,12 @@ using UnityEngine.UI;
 /// as soon as it has a range (OrbitFit.TryFit off TrackManager.BestRange) - identification is NOT required:
 /// the planner only needs orbital parameters, and a bad fit just means a bad burn. Purely informational
 /// otherwise, so Hide() is a no-op.
+///
+/// Renamed from SystemScreen (UI shell rework): "System" collided with the new SYSTEMS major sidebar mode
+/// (Reactor/Wake) even though this is a Sensors tab and has nothing to do with it. Loc keys stayed
+/// "ui.system.*" - only the class name and the tab's displayed label changed.
 /// </summary>
-public sealed class SystemScreen
+public sealed class ContactsScreen
 {
     private const int MaxRows = 16;
     private const float RefreshInterval = 0.5f;

@@ -5,7 +5,8 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// The persistent survey log (Game.State.Atlas), browsed in three levels inside one draggable panel:
+/// The persistent survey log (Game.State.Atlas), the ATLAS major mode's sole content (UI shell rework - no
+/// longer a draggable floating panel), browsed in three levels:
 ///   SYSTEMS  every system with data (home first), with body / entry counts and value;
 ///   SYSTEM   that system's known bodies as a tree (moons indented under their planet; a parent nobody surveyed
 ///            is shown dimmed, for context), then an "unidentified contacts" group;
@@ -61,18 +62,15 @@ public sealed class AtlasPanel
     {
         UITheme t = UITheme.Current;
 
+        // Fills the content rect the ATLAS major mode is given (GameShell) - no longer an absolute-anchored,
+        // auto-sized, draggable floating window.
         Image panel = UIKit.AddPanel(parent, "AtlasPanel", t.panelColor);
         panel.raycastTarget = true;
         RectTransform prt = panel.rectTransform;
-        prt.anchorMin = prt.anchorMax = prt.pivot = new Vector2(0f, 1f);
-        prt.anchoredPosition = new Vector2(8f, -(t.statusBarHeight + 8f));
-        prt.sizeDelta = new Vector2(640f, 0f);
+        UIKit.Stretch(prt);
 
         var v = UIKit.VStack(prt, t.spacing * 0.5f, (int)t.padding);
         v.childAlignment = TextAnchor.UpperLeft;
-        var fit = prt.gameObject.AddComponent<ContentSizeFitter>();
-        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fit.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
         RectTransform top = UIKit.Node("Top", prt);
         UIKit.HStack(top, 8f, 0).childAlignment = TextAnchor.MiddleLeft;
@@ -100,7 +98,6 @@ public sealed class AtlasPanel
         UIKit.Size(_pageLabel.rectTransform, preferredWidth: 110f);
         _next = UIKit.AddButton(pager, ">", () => { _page++; }, 40f, 26f);
 
-        DraggablePanel.Attach(prt, "atlas");
         return prt.gameObject;
     }
 

@@ -3,12 +3,13 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// The NODE tab of SystemsDock: plan a maneuver node (a time plus prograde/retrograde and normal
-/// delta-v), preview the orbit it would produce without touching the ship, arm it so ManeuverPlan fires it
-/// automatically when simulated time reaches it, and optionally warp straight there. Also hosts "plot a
-/// transfer" - a basic Hohmann solver to whatever track is selected (Track panel, SYSTEM screen or the NAV
-/// map all set TrackManager.SelectedId). Uses OrbitFit.TryFit off the track's own range estimate, never a
-/// catalog/NodeData lookup - no identification required, just a usable range (see OrbitFit's doc).
+/// The NODES minor mode of Navigation (UI shell rework - previously the NODE tab of SystemsDock): plan a
+/// maneuver node (a time plus prograde/retrograde and normal delta-v), preview the orbit it would produce
+/// without touching the ship, arm it so ManeuverPlan fires it automatically when simulated time reaches it,
+/// and optionally warp straight there. Also hosts "plot a transfer" - a basic Hohmann solver to whatever
+/// track is selected (Track strip, ContactsScreen or the NAV map all set TrackManager.SelectedId). Uses
+/// OrbitFit.TryFit off the track's own range estimate, never a catalog/NodeData lookup - no identification
+/// required, just a usable range (see OrbitFit's doc).
 /// </summary>
 public sealed class NodePanel
 {

@@ -3,9 +3,10 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Bottom-right panel: ship heading, velocity and discrete burns. A burn changes the velocity along the
-/// heading instantly and spends hydrogen (see ProbeSpec.hydrogenPerKmS). Manoeuvring is what makes range
-/// observable from bearings alone.
+/// The MANOEUVERS minor mode of Navigation (UI shell rework - previously its own draggable bottom-right
+/// panel): ship heading, velocity and discrete burns. A burn changes the velocity along the heading instantly
+/// and spends hydrogen (see ProbeSpec.hydrogenPerKmS). Manoeuvring is what makes range observable from
+/// bearings alone.
 /// </summary>
 public sealed class ManeuverPanel
 {
@@ -17,22 +18,14 @@ public sealed class ManeuverPanel
     private Button _burn, _retro;
     private int _sizeIndex = 1;
 
-    public void Build(Transform parent)
+    public GameObject Build(Transform parent)
     {
         UITheme t = UITheme.Current;
 
-        Image panel = UIKit.AddPanel(parent, "ManeuverPanel", t.panelColor);
-        panel.raycastTarget = true;
-        RectTransform prt = panel.rectTransform;
-        prt.anchorMin = prt.anchorMax = prt.pivot = new Vector2(1f, 0f);
-        prt.anchoredPosition = new Vector2(-8f, 8f);
-        prt.sizeDelta = new Vector2(430f, 0f);
-
+        RectTransform prt = UIKit.Node("Maneuver", parent);
+        UIKit.Size(prt, flexibleWidth: 1f);
         var v = UIKit.VStack(prt, t.spacing, (int)t.padding);
         v.childAlignment = TextAnchor.UpperLeft;
-        var fit = prt.gameObject.AddComponent<ContentSizeFitter>();
-        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fit.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
         UIKit.AddLabel(prt, Loc.Get("ui.maneuver"), t.fontSizeBody, t.accent);
 
@@ -67,7 +60,7 @@ public sealed class ManeuverPanel
         _retro = UIKit.AddButton(burnRow, Loc.Get("ui.burn.retro"), () => Burn(-1f), 0f, 40f);
 
         _cost = UIKit.AddLabel(prt, "", t.fontSizeSmall, t.textDim);
-        DraggablePanel.Attach(prt, "maneuver");
+        return prt.gameObject;
     }
 
     private void Burn(float sign)

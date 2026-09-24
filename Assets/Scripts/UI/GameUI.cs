@@ -10,15 +10,9 @@ public class GameUI : MonoBehaviour
 {
     // Recreated by RebuildUI (theme / text size change): screens capture colors and sizes when built.
     private StatusBar _status;
-    private TrackPanel _trackPanel;
-    private ManeuverPanel _maneuver;
-    private OrbitPanel _orbit;
-    private SystemsDock _systems;
-    private SensorConsole _sensors;
-    private AtlasPanel _atlas;
+    private GameShell _shell; // sidebar + track strip + Sensors/Navigation/Comms/Systems/Atlas (UI shell rework)
     private DebriefScreen _debrief;
     private RefitScreen _refit;
-    private NavScreen _nav;
     private MenuUI _menu;
     private TMPro.TextMeshProUGUI _toast;
     private int _toastSerial;
@@ -45,15 +39,9 @@ public class GameUI : MonoBehaviour
         _builtText = Settings.Data.textSize;
 
         _status = new StatusBar();
-        _trackPanel = new TrackPanel();
-        _maneuver = new ManeuverPanel();
-        _orbit = new OrbitPanel();
-        _systems = new SystemsDock();
-        _sensors = new SensorConsole();
-        _atlas = new AtlasPanel();
+        _shell = new GameShell();
         _debrief = new DebriefScreen();
         _refit = new RefitScreen();
-        _nav = new NavScreen();
         _menu = new MenuUI(_menuState);
 
         var canvasGO = new GameObject("GameCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -70,17 +58,11 @@ public class GameUI : MonoBehaviour
         _scaler.matchWidthOrHeight = 0.5f;
         ApplyScale();
 
-        _status.Build(canvasGO.transform, () => _nav.Toggle());
-        _trackPanel.Build(canvasGO.transform);
-        _maneuver.Build(canvasGO.transform);
-        _orbit.Build(canvasGO.transform);
-        _systems.Build(canvasGO.transform);
-        _sensors.Build(canvasGO.transform);
-        _atlas.Build(canvasGO.transform);
+        _status.Build(canvasGO.transform);
+        _shell.Build(canvasGO.transform);
         BuildToast(canvasGO.transform);
         _debrief.Build(canvasGO.transform);
         _refit.Build(canvasGO.transform);
-        _nav.Build(canvasGO.transform);
         _menu.Build(canvasGO.transform); // last = drawn on top
     }
 
@@ -89,7 +71,7 @@ public class GameUI : MonoBehaviour
     /// are redrawn.</summary>
     private void RebuildUI()
     {
-        if (_sensors != null) _sensors.Shutdown();
+        if (_shell != null) _shell.Shutdown();
         if (_refit != null) _refit.Shutdown();
         if (_canvasGO != null) Destroy(_canvasGO);
         UITheme.Rebuild();
@@ -136,14 +118,9 @@ public class GameUI : MonoBehaviour
 
         _debrief.Refresh();
         _refit.Refresh();
-        _nav.Refresh();
         _status.Refresh();
-        _trackPanel.Refresh();
-        _maneuver.Refresh();
-        _orbit.Refresh();
-        _systems.Refresh();
-        _sensors.Refresh(0f);
-        _atlas.Refresh();
+        _shell.RefreshFast(0f);
+        _shell.RefreshSlow();
     }
 
     private void BuildToast(Transform parent)
@@ -227,19 +204,15 @@ public class GameUI : MonoBehaviour
         UpdateToast();
 
         // Sensor screens tick every frame (scan rows, DSP redraws) like RunDriver ticks WaterfallProcessor —
-        // a hidden mode still needs a smooth accumulator, not 100ms chunks.
-        _sensors.Refresh(Time.unscaledDeltaTime);
+        // a hidden mode still needs a smooth accumulator, not 100ms chunks. NavScreen (inside Navigation)
+        // self-throttles its own redraw, but still needs an every-frame check for that and its gating.
+        _shell.RefreshFast(Time.unscaledDeltaTime);
         _refit.Refresh(); // cheap unless the loadout changed: keeps the < > clicks instant
-        _nav.Refresh();   // self-throttles its own redraw; open/close and gating still need every-frame checks
 
         // The clock and power move every frame; 10 Hz is plenty for the text.
         if (Time.unscaledTime < _nextRefresh) return;
         _nextRefresh = Time.unscaledTime + 0.1f;
         _status.Refresh();
-        _trackPanel.Refresh();
-        _maneuver.Refresh();
-        _orbit.Refresh();
-        _systems.Refresh();
-        _atlas.Refresh();
+        _shell.RefreshSlow();
     }
 }

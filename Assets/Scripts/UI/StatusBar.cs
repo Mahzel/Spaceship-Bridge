@@ -15,13 +15,13 @@ public sealed class StatusBar
 
     private TextMeshProUGUI _runLine, _systemLine, _net;
     private UIBar _power, _hydrogen, _storage;
-    private Button _pause, _nav;
+    private Button _pause;
     private Button[] _warpMult;
     private Button[] _warpUnit;
 
-    /// <summary>Wired by GameUI (which owns the NavScreen instance) so this stays a plain click callback,
-    /// same as every other button here talking straight to Game.* statics.</summary>
-    public void Build(Transform parent, System.Action onNavToggle)
+    /// <summary>No more NAV toggle button here (UI shell rework): Navigation is a GameShell sidebar major
+    /// mode now, reachable the same way as every other mode, not a special status-bar button.</summary>
+    public void Build(Transform parent)
     {
         UITheme t = UITheme.Current;
 
@@ -55,9 +55,6 @@ public sealed class StatusBar
         UIKit.Size(_net.rectTransform, preferredWidth: 310f);
 
         UIKit.AddSpacer(rt, 0f, flexibleWidth: 1f);
-
-        // Nav (only shown once a nav computer is fitted; toggles NavScreen, owned by GameUI)
-        _nav = UIKit.AddButton(rt, Loc.Get("ui.nav.open"), () => onNavToggle?.Invoke(), 56f, 44f);
 
         // Pause + warp
         _pause = UIKit.AddButton(rt, Loc.Get("ui.pause"), () =>
@@ -135,8 +132,6 @@ public sealed class StatusBar
         float net = run.IncomePerDay - run.LoadPerDay;
         UIKit.SetText(_net, Loc.Get("ui.net", net, run.SolarPerDay, run.LoadPerDay, run.ReactorPerDay));
         _net.color = net >= 0f ? t.good : t.warning;
-
-        _nav.gameObject.SetActive(NavTier.HasSystemView(state.Loadout.Level(ProbeSystem.NavComputer)));
 
         UIKit.SetButtonActive(_pause, clock.Paused);
         for (int i = 0; i < _warpMult.Length; i++)

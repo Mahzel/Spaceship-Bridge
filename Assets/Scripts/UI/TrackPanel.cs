@@ -4,11 +4,14 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Top-right list of every track, searching or locked: select (click the name), bearing, fitted bearing rate,
-/// quality, drop. A searching (not yet locked) track's name shows red, matching its tick color everywhere
-/// else. New tracks are never created here — mark a bearing on the waterfall/DSP to seed one; this panel just
-/// lets the player set the name the NEXT mark will use, and manage/rename/drop what already exists.
-/// Reads Game.State.Tracks; refreshed by GameUI.
+/// Collapsible strip between the topbar and whichever major mode is showing (UI shell rework - previously a
+/// draggable floating window pinned to the top-right of the whole canvas). Every track, searching or locked:
+/// select (click the name), bearing, fitted bearing rate, quality, drop. A searching (not yet locked) track's
+/// name shows red, matching its tick color everywhere else. New tracks are never created here — mark a
+/// bearing on the waterfall/DSP to seed one; this panel just lets the player set the name the NEXT mark will
+/// use, and manage/rename/drop what already exists. Shown in every major mode (Sensors AND Navigation both
+/// need it - track selection drives the sensor SEL state and the NAV transfer target alike). Reads
+/// Game.State.Tracks.
 /// </summary>
 public sealed class TrackPanel
 {
@@ -27,17 +30,20 @@ public sealed class TrackPanel
     private TextMeshProUGUI _empty;
     private TMP_InputField _rename;
     private TMP_InputField _nextNameField;
+    private RectTransform _body;
+    private Button _collapse;
+    private TextMeshProUGUI _collapseLabel;
+    private bool _collapsed;
 
     public void Build(Transform parent)
     {
         UITheme t = UITheme.Current;
 
-        Image panel = UIKit.AddPanel(parent, "TrackPanel", t.panelColor);
-        panel.raycastTarget = true;
-        RectTransform prt = panel.rectTransform;
-        prt.anchorMin = prt.anchorMax = prt.pivot = new Vector2(1f, 1f);
-        prt.anchoredPosition = new Vector2(-8f, -(t.statusBarHeight + 8f));
-        prt.sizeDelta = new Vector2(640f, 0f);
+        RectTransform prt = UIKit.Node("TrackStrip", parent);
+        UIKit.Size(prt, flexibleWidth: 1f);
+        Image bg = prt.gameObject.AddComponent<Image>();
+        bg.color = t.panelColor;
+        bg.raycastTarget = true;
 
         var v = UIKit.VStack(prt, t.spacing, (int)t.padding);
         v.childAlignment = TextAnchor.UpperLeft;
@@ -45,24 +51,47 @@ public sealed class TrackPanel
         fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         fit.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
-        UIKit.AddLabel(prt, Loc.Get("ui.tracks"), t.fontSizeBody, t.accent);
-        _empty = UIKit.AddLabel(prt, Loc.Get("ui.tracks.none"), t.fontSizeSmall, t.textDim);
+        RectTransform header = UIKit.Node("Header", prt);
+        UIKit.HStack(header, 8f, 0, expandWidth: true).childAlignment = TextAnchor.MiddleLeft;
+        UIKit.AddLabel(header, Loc.Get("ui.tracks"), t.fontSizeBody, t.accent);
+        UIKit.AddSpacer(header, 0f, flexibleWidth: 1f);
+        _collapse = UIKit.AddButton(header, "", ToggleCollapsed, 90f, 30f);
+        _collapseLabel = _collapse.GetComponentInChildren<TextMeshProUGUI>();
 
-        RectTransform markRow = UIKit.Node("MarkRow", prt);
+        _body = UIKit.Node("Body", prt);
+        var bv = UIKit.VStack(_body, t.spacing, 0);
+        bv.childAlignment = TextAnchor.UpperLeft;
+
+        _empty = UIKit.AddLabel(_body, Loc.Get("ui.tracks.none"), t.fontSizeSmall, t.textDim);
+
+        RectTransform markRow = UIKit.Node("MarkRow", _body);
         var mh = UIKit.HStack(markRow, 6f, 0);
         mh.childAlignment = TextAnchor.MiddleLeft;
         UIKit.AddLabel(markRow, Loc.Get("ui.track.nextname"), t.fontSizeSmall, t.textDim);
         _nextNameField = UIKit.AddInputField(markRow, Loc.Get("ui.track.nextnamehint"), 16, OnNextNameEdit, 160f, 34f);
         UIKit.AddLabel(markRow, Loc.Get("ui.track.markhint"), t.fontSizeSmall, t.textDim);
 
-        for (int i = 0; i < MaxRows; i++) _rows.Add(BuildRow(prt));
+        for (int i = 0; i < MaxRows; i++) _rows.Add(BuildRow(_body));
 
-        RectTransform nameRow = UIKit.Node("NameRow", prt);
+        RectTransform nameRow = UIKit.Node("NameRow", _body);
         var nh = UIKit.HStack(nameRow, 6f, 0);
         nh.childAlignment = TextAnchor.MiddleLeft;
         UIKit.AddLabel(nameRow, Loc.Get("ui.track.name"), t.fontSizeSmall, t.textDim);
         _rename = UIKit.AddInputField(nameRow, Loc.Get("ui.track.namehint"), 16, OnRename, 240f, 34f);
-        DraggablePanel.Attach(prt, "tracks");
+
+        RefreshCollapsed();
+    }
+
+    private void ToggleCollapsed()
+    {
+        _collapsed = !_collapsed;
+        RefreshCollapsed();
+    }
+
+    private void RefreshCollapsed()
+    {
+        _body.gameObject.SetActive(!_collapsed);
+        UIKit.SetText(_collapseLabel, Loc.Get(_collapsed ? "ui.tracks.expand" : "ui.tracks.collapse"));
     }
 
     private Row BuildRow(Transform parent)

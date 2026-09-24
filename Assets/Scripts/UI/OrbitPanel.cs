@@ -3,9 +3,13 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Top-left readout of the ship's actual orbit (see ShipOrbit / OrbitalMechanics): what it's currently
+/// Persistent readout of the ship's actual orbit (see ShipOrbit / OrbitalMechanics): what it's currently
 /// orbiting, periapsis/apoapsis, eccentricity, inclination and period. Read-only for now - maneuver-node
-/// planning is a later pass. Reads Game.State.ShipOrbit; refreshed by GameUI like every other panel.
+/// planning is a later pass. Reads Game.State.ShipOrbit.
+///
+/// Lives pinned to the bottom-right corner of the NAV minor mode's content (Navigation major mode, UI shell
+/// rework) - no longer a draggable floating window anchored to the whole canvas. Build's `parent` is that
+/// NAV tab's own root rect, so "bottom-right" here means bottom-right of THAT, not the screen.
 /// </summary>
 public sealed class OrbitPanel
 {
@@ -18,9 +22,9 @@ public sealed class OrbitPanel
         Image panel = UIKit.AddPanel(parent, "OrbitPanel", t.panelColor);
         panel.raycastTarget = true;
         RectTransform prt = panel.rectTransform;
-        prt.anchorMin = prt.anchorMax = prt.pivot = new Vector2(0f, 1f);
-        prt.anchoredPosition = new Vector2(8f, -(t.statusBarHeight + 8f));
-        prt.sizeDelta = new Vector2(380f, 0f);
+        prt.anchorMin = prt.anchorMax = prt.pivot = new Vector2(1f, 0f);
+        prt.anchoredPosition = new Vector2(-8f, 8f);
+        prt.sizeDelta = new Vector2(340f, 0f);
 
         var v = UIKit.VStack(prt, t.spacing, (int)t.padding);
         v.childAlignment = TextAnchor.UpperLeft;
@@ -34,8 +38,6 @@ public sealed class OrbitPanel
         _shape   = UIKit.AddLabel(prt, "", t.fontSizeSmall, t.textDim);
         _period  = UIKit.AddLabel(prt, "", t.fontSizeSmall, t.textDim);
         _now     = UIKit.AddLabel(prt, "", t.fontSizeSmall, t.textDim);
-
-        DraggablePanel.Attach(prt, "orbit");
     }
 
     public void Refresh()

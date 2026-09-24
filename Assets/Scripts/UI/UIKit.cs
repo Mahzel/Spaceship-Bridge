@@ -33,13 +33,15 @@ public static class UIKit
         if (label.text != value) label.text = value;
     }
 
-    public static LayoutElement Size(RectTransform rt, float preferredWidth = -1f, float minHeight = -1f, float flexibleWidth = -1f)
+    public static LayoutElement Size(RectTransform rt, float preferredWidth = -1f, float minHeight = -1f,
+                                     float flexibleWidth = -1f, float flexibleHeight = -1f)
     {
         var le = rt.gameObject.GetComponent<LayoutElement>();
         if (le == null) le = rt.gameObject.AddComponent<LayoutElement>();
-        if (preferredWidth >= 0f) le.preferredWidth = preferredWidth;
-        if (minHeight >= 0f)      le.minHeight = minHeight;
-        if (flexibleWidth >= 0f)  le.flexibleWidth = flexibleWidth;
+        if (preferredWidth >= 0f)  le.preferredWidth = preferredWidth;
+        if (minHeight >= 0f)       le.minHeight = minHeight;
+        if (flexibleWidth >= 0f)   le.flexibleWidth = flexibleWidth;
+        if (flexibleHeight >= 0f)  le.flexibleHeight = flexibleHeight;
         return le;
     }
 

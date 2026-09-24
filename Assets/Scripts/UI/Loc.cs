@@ -10,6 +10,14 @@ public static class Loc
     private static readonly Dictionary<string, string> English = new Dictionary<string, string>
     {
         // Systems dock tabs
+        { "ui.mode.sensors",    "SENSORS" },
+        { "ui.mode.navigation", "NAVIGATION" },
+        { "ui.mode.comms",      "COMMS" },
+        { "ui.mode.systems",    "SYSTEMS" },
+        { "ui.mode.atlas",      "ATLAS" },
+
+        { "ui.tab.nav",      "NAV" },
+        { "ui.tab.maneuver", "MANOEUVERS" },
         { "ui.tab.jump",    "JUMP" },
         { "ui.tab.wake",    "WAKE" },
         { "ui.tab.reactor", "REACTOR" },
@@ -21,7 +29,7 @@ public static class Loc
         { "ui.screen.waterfall",     "WATERFALL" },
         { "ui.screen.imager",        "IMAGER" },
         { "ui.screen.spectrometer",  "SPECTROMETER" },
-        { "ui.screen.system",        "SYSTEM" },
+        { "ui.screen.system",        "CONTACTS" },
         { "ui.screen.radar",         "RADAR" },
         { "ui.screen.notfitted",     "{0}: NOT FITTED\n\nThis probe doesn't carry one. Fit it at the next refit." },
         { "ui.screen.power.on",      "SENSOR ON" },
@@ -140,6 +148,8 @@ public static class Loc
 
         // Tracks
         { "ui.tracks",         "TRACKS" },
+        { "ui.tracks.collapse", "HIDE" },
+        { "ui.tracks.expand",   "SHOW" },
         { "ui.tracks.none",    "No contact." },
         { "ui.track.bearing",  "{0:F1} deg" },
         { "ui.track.rate",     "{0:+0.00;-0.00} deg/d" },

@@ -5,16 +5,22 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// NAV: full-screen graphical plot of the ship's own orbit (handoff-navigation-ui.md, roadmap item 1).
-/// Gated by the NavComputer loadout tier (NavTier.HasSystemView) - unfitted, the screen still opens but shows
+/// NAV: graphical plot of the ship's own orbit (handoff-navigation-ui.md, roadmap item 1). The default minor
+/// mode of Navigation (UI shell rework) - NavigationMode builds this to fill its own tab body, alongside
+/// OrbitPanel pinned to that same body's bottom-right corner (the numeric readout this screen used to
+/// duplicate in its own sidebar; that duplication is gone now that Orbit is always right there). No longer a
+/// full-screen dim+panel overlay with its own Back button: OnShown()/Refresh() replace the old Open/Close/
+/// IsOpen toggle, and visibility is entirely NavigationMode's tab-switch, not this class's own.
+///
+/// Gated by the NavComputer loadout tier (NavTier.HasSystemView) - unfitted, the tab still shows but with
 /// only a "not fitted" message, same pattern as ui.screen.notfitted for sensors.
 ///
 /// Own-ship orbit is exact (ShipOrbit's conic, not a sensor read): the ellipse, Pe/Ap, the reference-plane
 /// crossings (AN/DN) and a live true-anomaly marker. Catalogue and track layers (roadmap item 2) are drawn on
 /// top, toggle-able, and never touch SensorSight or a live CelestialBody - catalogue orbits come from
 /// Catalogue.CollectOrbitsAroundPrimary (the generated SystemData elements), tracks from TrackManager's own
-/// bearing/range estimates. Clicking a track here selects it exactly like SystemScreen's row click (Track
-/// panel, radar TRACK mode and Game.State.TargetBodyName all follow). The sidebar's TRANSFER section
+/// bearing/range estimates. Clicking a track here selects it exactly like ContactsScreen's row click (Track
+/// strip, radar TRACK mode and Game.State.TargetBodyName all follow). The sidebar's TRANSFER section
 /// (roadmap item 5) previews and arms a Hohmann transfer to that target: phase angle now vs. the next window,
 /// wait time, Δv and time of flight (ManeuverPlan.ComputeTransferWindow), then CREATE NODES arms the same
 /// two-burn plan NodePanel's "plot a transfer" does (ManeuverPlan.SolveHohmann) but timed to the window
@@ -37,12 +43,11 @@ public sealed class NavScreen
     private const float BearingRayPx = 160f; // length of a bearing-only track's ray, screen pixels
     private const float TrackClickRadiusPx = 14f; // how close a click must land on a track's marker to select it
 
-    private GameObject _root;
-    private RectTransform _panelRect, _mapRect, _dialRect;
+    private RectTransform _rootRect, _mapRect, _dialRect;
     private MapCanvas _map, _dial;
-    private TextMeshProUGUI _notFitted, _primary, _shape, _incl, _period, _nu;
+    private TextMeshProUGUI _notFitted, _incl;
     private TextMeshProUGUI _peLabel, _apLabel, _anLabel, _dnLabel, _shipLabel;
-    private Button _back, _zoomIn, _zoomOut, _layerCatalogue, _layerTracks;
+    private Button _zoomIn, _zoomOut, _layerCatalogue, _layerTracks;
 
     // Layer toggles (roadmap item 2). Pooled labels grow to fit however many catalogue bodies / tracks exist.
     private bool _showCatalogue = true, _showTracks = true;
@@ -52,58 +57,44 @@ public sealed class NavScreen
     // Screen position of every track drawn this redraw, for click-to-select (DrawTrackLayer fills it, OnMapClicked reads it).
     private readonly List<(int id, Vector2 pos)> _trackHits = new List<(int, Vector2)>();
 
-    // Transfer helper (roadmap item 5): reads Game.State.Tracks.SelectedId, the same selection SystemScreen
+    // Transfer helper (roadmap item 5): reads Game.State.Tracks.SelectedId, the same selection ContactsScreen
     // sets when the player clicks a track there (or a track clicked directly on this map) - no identification
     // required, see OrbitFit. TargetBodyName is only read for the display label.
     private TextMeshProUGUI _transferHeader, _transferTarget, _transferPhase, _transferWindow, _transferDv;
     private Button _transferButton;
 
-    private bool _open;
     private float _pixelsPerAu = 40f;
     private bool _fitted; // whether AutoFit ran for the orbit currently on screen
     private float _redrawAccum = RedrawInterval;
 
-    public bool IsOpen => _open;
-
     // -----------------------------------------------------------------------------------------------------
     #region Build
-    public void Build(Transform parent)
+    /// <summary>Fills whatever tab-body rect NavigationMode gives it. No background of its own (matching
+    /// NodePanel/JumpPanel's style) - it's already inside NavigationMode's own panel.</summary>
+    public GameObject Build(Transform parent)
     {
         UITheme t = UITheme.Current;
 
-        Image dim = UIKit.AddPanel(parent, "Nav", t.dimColor);
-        dim.raycastTarget = true;
-        UIKit.Stretch(dim.rectTransform);
-        _root = dim.gameObject;
+        RectTransform prt = UIKit.Node("Nav", parent);
+        UIKit.Stretch(prt);
+        _rootRect = prt;
 
-        Image panel = UIKit.AddPanel(dim.transform, "Panel", t.panelColor);
-        RectTransform prt = panel.rectTransform;
-        _panelRect = prt;
-        prt.anchorMin = new Vector2(0.03f, 0.05f);
-        prt.anchorMax = new Vector2(0.97f, 0.95f);
-        prt.offsetMin = prt.offsetMax = Vector2.zero;
-
-        var v = UIKit.VStack(prt, t.spacing, (int)t.padding);
+        var v = UIKit.VStack(prt, t.spacing, 0);
         v.childAlignment = TextAnchor.UpperLeft;
-
-        RectTransform top = UIKit.Node("Top", prt);
-        UIKit.HStack(top, 8f, 0).childAlignment = TextAnchor.MiddleLeft;
-        _back = UIKit.AddButton(top, Loc.Get("ui.nav.back"), Close, 90f, 34f);
-        UIKit.AddLabel(top, Loc.Get("ui.nav.title"), t.fontSizeBody, t.accent);
 
         _notFitted = UIKit.AddLabel(prt, "", t.fontSizeBody, t.textDim);
         _notFitted.textWrappingMode = TextWrappingModes.Normal;
         UIKit.Size(_notFitted.rectTransform, preferredWidth: 800f);
 
         RectTransform body = UIKit.Node("Body", prt);
-        UIKit.Size(body, flexibleWidth: 1f);
+        UIKit.Size(body, flexibleWidth: 1f, flexibleHeight: 1f);
         var bodyH = UIKit.HStack(body, t.spacing * 2f, 0, expandWidth: true);
         bodyH.childAlignment = TextAnchor.UpperLeft;
 
         BuildMap(body);
         BuildSidebar(body, t);
 
-        _root.SetActive(false);
+        return prt.gameObject;
     }
 
     private void BuildMap(Transform parent)
@@ -111,13 +102,13 @@ public sealed class NavScreen
         _mapRect = UIKit.Node("Map", parent);
         UIKit.Size(_mapRect, flexibleWidth: 1f, minHeight: 600f);
         _map = _mapRect.gameObject.AddComponent<MapCanvas>();
-        _map.raycastTarget = true; // clickable: selecting a track here mirrors SystemScreen's row click
+        _map.raycastTarget = true; // clickable: selecting a track here mirrors ContactsScreen's row click
         var aim = _mapRect.gameObject.AddComponent<PointerAim>();
         aim.OnClick = OnMapClicked;
     }
 
     /// <summary>Selects whichever track's last-drawn marker (DrawTrackLayer's _trackHits) is nearest the
-    /// click, within TrackClickRadiusPx - same effect as SystemScreen.Select(), so the Track panel, radar
+    /// click, within TrackClickRadiusPx - same effect as ContactsScreen.Select(), so the Track strip, radar
     /// TRACK mode and the transfer target all follow a click here exactly as they follow one there.</summary>
     private void OnMapClicked(Vector2 local, RectTransform rt)
     {
@@ -146,12 +137,6 @@ public sealed class NavScreen
         var v = UIKit.VStack(side, t.spacing, 0);
         v.childAlignment = TextAnchor.UpperLeft;
 
-        _primary = UIKit.AddLabel(side, "", t.fontSizeBody, t.accent);
-        _shape   = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
-        _period  = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
-        _nu      = UIKit.AddLabel(side, "", t.fontSizeSmall, t.textDim);
-
-        UIKit.AddSpacer(side, 6f);
         _incl = UIKit.AddLabel(side, "", t.fontSizeSmall, t.text);
 
         _dialRect = UIKit.Node("InclDial", side);
@@ -200,36 +185,24 @@ public sealed class NavScreen
     #endregion
 
     // -----------------------------------------------------------------------------------------------------
-    #region Open / close
-    public void Toggle() { if (_open) Close(); else Open(); }
-
-    public void Open()
+    #region Shown / Refresh
+    /// <summary>Called by NavigationMode whenever its tab row switches TO the NAV tab - replaces the old
+    /// Open()'s "re-fit zoom to whatever orbit is current". Also forces a layout pass on the map rect before
+    /// the next AutoFit reads it, in case this is the very first time the tab body's size has settled.</summary>
+    public void OnShown()
     {
-        if (_root == null) return;
-        _open = true;
-        _fitted = false; // re-fit zoom to whatever orbit is current
+        _fitted = false;
         _redrawAccum = RedrawInterval;
+        if (_mapRect != null) LayoutRebuilder.ForceRebuildLayoutImmediate(_mapRect);
     }
 
-    public void Close() => _open = false;
-    #endregion
-
-    // -----------------------------------------------------------------------------------------------------
-    #region Refresh
+    /// <summary>Cheap enough to call every tick even while this tab isn't the one showing (NavigationMode
+    /// refreshes every minor mode's body regardless, same convention as SystemsDock/SensorConsole).</summary>
     public void Refresh()
     {
-        if (_root == null) return;
-
+        if (_rootRect == null) return;
         RunController run = Game.Run;
-        bool canShow = _open && run != null && run.Phase == RunPhase.Flight;
-        if (_root.activeSelf != canShow)
-        {
-            _root.SetActive(canShow);
-            // Force the flex layout (map/sidebar widths) to settle before the first Draw() reads _mapRect.rect,
-            // so the initial zoom fit isn't computed off a stale (or default) rect size from while it was hidden.
-            if (canShow) LayoutRebuilder.ForceRebuildLayoutImmediate(_panelRect);
-        }
-        if (!canShow) { _open = _open && canShow; return; }
+        if (run == null || run.Phase != RunPhase.Flight) return;
 
         int navLevel = Game.State != null ? Game.State.Loadout.Level(ProbeSystem.NavComputer) : 0;
         bool fitted = NavTier.HasSystemView(navLevel);
@@ -251,10 +224,6 @@ public sealed class NavScreen
 
     private void SetSidebarActive(bool active)
     {
-        _primary.gameObject.SetActive(active);
-        _shape.gameObject.SetActive(active);
-        _period.gameObject.SetActive(active);
-        _nu.gameObject.SetActive(active);
         _incl.gameObject.SetActive(active);
         _dialRect.gameObject.SetActive(active);
         _zoomIn.gameObject.SetActive(active);
@@ -299,8 +268,7 @@ public sealed class NavScreen
             HideCatalogueLabels();
             HideTrackLabels();
             _trackHits.Clear();
-            UIKit.SetText(_primary, Loc.Get("ui.nav.none"));
-            UIKit.SetText(_shape, ""); UIKit.SetText(_period, ""); UIKit.SetText(_nu, ""); UIKit.SetText(_incl, "");
+            UIKit.SetText(_incl, "");
             _map.Rebuild();
             DrawDial(float.NaN);
             return;
@@ -380,14 +348,7 @@ public sealed class NavScreen
         _map.Rebuild();
         PlaceMarkerLabels(peScreen, apScreen, anScreen, dnScreen, shipScreen);
 
-        // Readout.
-        UIKit.SetText(_primary, Loc.Get("ui.nav.primary", orbit.PrimaryName));
-        float semiMajorAu = Mathf.Abs((float)orbit.SemiMajorAxis) / gu;
-        UIKit.SetText(_shape, Loc.Get("ui.nav.shape", Loc.Distance(semiMajorAu), orbit.Eccentricity));
-        UIKit.SetText(_period, bound ? Loc.Get("ui.nav.period", orbit.Elements.orbitalPeriod / 86400.0) : "");
-        UIKit.SetText(_nu, Loc.Get("ui.nav.nu", orbit.TrueAnomalyDeg));
         UIKit.SetText(_incl, Loc.Get("ui.nav.incl", orbit.Elements.inclination));
-
         DrawDial(orbit.Elements.inclination);
     }
 
@@ -561,7 +522,7 @@ public sealed class NavScreen
 
     /// <summary>Roadmap item 5 (transfer helper): phase angle now vs. the window, wait time, Δv and time of
     /// flight for a Hohmann transfer to the selected track (Game.State.Tracks.SelectedId - the same selection
-    /// SystemScreen's row click and OnMapClicked above both drive). The orbit itself comes from OrbitFit.TryFit
+    /// ContactsScreen's row click and OnMapClicked above both drive). The orbit itself comes from OrbitFit.TryFit
     /// off that track's own range estimate, never a catalog/NodeData lookup - no identification required, just
     /// a usable range. Read-only; CreateTransferNodes is the only thing that commits it. Runs every redraw
     /// tick, independent of whether the ship's own orbit has a trajectory, so the panel stays live even while

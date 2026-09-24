@@ -96,12 +96,14 @@ public sealed class ImagerScreen
 
         RectTransform root = UIKit.Node("Imager", parent);
         _root = root.gameObject;
-        UIKit.Size(root, flexibleWidth: 1f);
-        var v = UIKit.VStack(root, t.spacing, 0);
-        v.childAlignment = TextAnchor.UpperLeft;
-        var fit = root.gameObject.AddComponent<ContentSizeFitter>();
-        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fit.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        UIKit.Size(root, flexibleWidth: 1f, flexibleHeight: 1f);
+        // Display (left, aspect-locked) | controls (right, fixed width) - was a full-width display over two
+        // control rows, but a display sized only by preferredWidth got force-stretched into a distorted
+        // rectangle once this screen started filling GameShell's much wider content area (SensorConsole's own
+        // VStack force-expands every tab body's width). expandWidth: false so the fixed-width controls column
+        // isn't ALSO force-expanded - see GameShell/NavScreen's sidebar fixes for exactly this failure mode.
+        var h = UIKit.HStack(root, t.spacing, 0, expandWidth: false);
+        h.childAlignment = TextAnchor.UpperLeft;
 
         BuildDisplay(root);
         BuildControls(root);
@@ -115,8 +117,19 @@ public sealed class ImagerScreen
     private void BuildDisplay(Transform parent)
     {
         UITheme t = UITheme.Current;
-        RectTransform area = UIKit.Node("DisplayArea", parent);
-        UIKit.Size(area, preferredWidth: DisplayW, minHeight: DisplayH);
+
+        // Flexible slot claiming whatever room is left beside the controls column.
+        RectTransform slot = UIKit.Node("DisplaySlot", parent);
+        UIKit.Size(slot, flexibleWidth: 1f, flexibleHeight: 1f, minHeight: DisplayH);
+
+        // The display itself: Stretch-filled into the slot, then AspectRatioFitter (FitInParent) shrinks
+        // whichever axis has spare room so it renders at the largest size that keeps the raster's real 16:9
+        // (DisplayW:DisplayH) shape - centered, letterboxed, never distorted, however wide the slot gets.
+        RectTransform area = UIKit.Node("DisplayArea", slot);
+        UIKit.Stretch(area);
+        var fitter = area.gameObject.AddComponent<AspectRatioFitter>();
+        fitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+        fitter.aspectRatio = DisplayW / (float)DisplayH;
 
         _image = UIKit.AddRawImage(area, "Scan", Color.white);
         UIKit.Stretch(_image.rectTransform);
@@ -127,47 +140,81 @@ public sealed class ImagerScreen
 
         Color c = t.accent; c.a = 0.5f;
         _crossH = UIKit.AddPanel(area, "CrossH", c);
-        RectTransform h = _crossH.rectTransform;
-        h.anchorMin = new Vector2(0f, 0.5f); h.anchorMax = new Vector2(1f, 0.5f);
-        h.sizeDelta = new Vector2(0f, 2f);
+        RectTransform ch = _crossH.rectTransform;
+        ch.anchorMin = new Vector2(0f, 0.5f); ch.anchorMax = new Vector2(1f, 0.5f);
+        ch.sizeDelta = new Vector2(0f, 2f);
 
         _crossV = UIKit.AddPanel(area, "CrossV", c);
-        RectTransform vv = _crossV.rectTransform;
-        vv.anchorMin = new Vector2(0.5f, 0f); vv.anchorMax = new Vector2(0.5f, 1f);
-        vv.sizeDelta = new Vector2(2f, 0f);
+        RectTransform cv = _crossV.rectTransform;
+        cv.anchorMin = new Vector2(0.5f, 0f); cv.anchorMax = new Vector2(0.5f, 1f);
+        cv.sizeDelta = new Vector2(2f, 0f);
     }
 
     private void BuildControls(Transform parent)
     {
         UITheme t = UITheme.Current;
 
-        RectTransform row1 = UIKit.Node("Row1", parent);
-        UIKit.HStack(row1, 6f, 0, expandWidth: true);
-        _scanButton = UIKit.AddButton(row1, "SCAN", OnToggleScan, 100f, 32f);
+        // Outer node: ONLY a LayoutElement, so the root HStack reads a clean, fixed preferredWidth - a
+        // VerticalLayoutGroup on the SAME node would report its own children-derived width instead and
+        // balloon this column (see GameShell.BuildSidebar's doc comment for the full explanation).
+        RectTransform controls = UIKit.Node("Controls", parent);
+        UIKit.Size(controls, preferredWidth: 380f, flexibleHeight: 1f);
+
+        RectTransform inner = UIKit.Node("Inner", controls);
+        UIKit.Stretch(inner);
+        var v = UIKit.VStack(inner, t.spacing, 0);
+        v.childAlignment = TextAnchor.UpperLeft;
+
+        BuildControlRows(inner);
+    }
+
+    private void BuildControlRows(Transform parent)
+    {
+        UITheme t = UITheme.Current;
+
+        // Reflowed into more, narrower rows than the old full-width single-row layout (SCAN/ZOOM/target/SEL/
+        // </> and the 4-stepper row both overflowed a 380px column) - same controls, same handlers, just
+        // stacked to fit the width the display's own fixed-aspect slot leaves it.
+        RectTransform row1a = UIKit.Node("Row1a", parent);
+        UIKit.HStack(row1a, 6f, 0, expandWidth: true);
+        _scanButton = UIKit.AddButton(row1a, "SCAN", OnToggleScan, 100f, 32f);
         _scanLabel = _scanButton.GetComponentInChildren<TextMeshProUGUI>();
-        _zoomButton = UIKit.AddButton(row1, "ZOOM", OnToggleZoom, 90f, 32f);
-        _targetLabel = UIKit.AddLabel(row1, "", t.fontSizeSmall, t.text, TextAlignmentOptions.MidlineLeft);
+        _zoomButton = UIKit.AddButton(row1a, "ZOOM", OnToggleZoom, 90f, 32f);
+
+        RectTransform row1b = UIKit.Node("Row1b", parent);
+        UIKit.HStack(row1b, 6f, 0, expandWidth: true).childAlignment = TextAnchor.MiddleLeft;
+        _targetLabel = UIKit.AddLabel(row1b, "", t.fontSizeSmall, t.text, TextAlignmentOptions.MidlineLeft);
         UIKit.Size(_targetLabel.rectTransform, flexibleWidth: 1f);
-        UIKit.AddButton(row1, "SEL", AimAtSelected, 50f, 32f);
-        UIKit.AddButton(row1, "<", () => CycleTarget(-1), 34f, 32f);
-        UIKit.AddButton(row1, ">", () => CycleTarget(1), 34f, 32f);
+        _targetLabel.textWrappingMode = TextWrappingModes.NoWrap;
+        _targetLabel.overflowMode = TextOverflowModes.Ellipsis; // the controls column is narrower now than
+                                                                  // the old full-width row - degrade gracefully
+        UIKit.AddButton(row1b, "SEL", AimAtSelected, 50f, 32f);
+        UIKit.AddButton(row1b, "<", () => CycleTarget(-1), 34f, 32f);
+        UIKit.AddButton(row1b, ">", () => CycleTarget(1), 34f, 32f);
 
-        RectTransform row2 = UIKit.Node("Row2", parent);
-        UIKit.HStack(row2, 6f, 0, expandWidth: true);
-        _fovLabel = Stepper(row2, "FOV", () => AdjustFov(-5f), () => AdjustFov(5f));
-        _resLabel = Stepper(row2, "RES", () => AdjustBlock(2), () => AdjustBlock(-2));
-        _gainLabel = Stepper(row2, "GAIN", () => AdjustGain(-0.25f), () => AdjustGain(0.25f));
-        _expLabel = Stepper(row2, "EXP", () => AdjustExposure(-0.25f), () => AdjustExposure(0.25f));
+        RectTransform row2a = UIKit.Node("Row2a", parent);
+        UIKit.HStack(row2a, 6f, 0, expandWidth: true);
+        _fovLabel = Stepper(row2a, "FOV", () => AdjustFov(-5f), () => AdjustFov(5f));
+        _resLabel = Stepper(row2a, "RES", () => AdjustBlock(2), () => AdjustBlock(-2));
 
-        RectTransform row3 = UIKit.Node("Row3", parent);
-        var h3 = UIKit.HStack(row3, 6f, 0);
-        h3.childAlignment = TextAnchor.MiddleLeft;
-        StepperButtons(row3, "AZ", () => SlewManual(-StepFovFraction * EffectiveFov(), 0f), () => SlewManual(StepFovFraction * EffectiveFov(), 0f));
-        StepperButtons(row3, "EL", () => SlewManual(0f, -StepFovFraction * EffectiveFov()), () => SlewManual(0f, StepFovFraction * EffectiveFov()));
-        _aimLabel = UIKit.AddLabel(row3, "", t.fontSizeSmall, t.text);
-        UIKit.Size(_aimLabel.rectTransform, preferredWidth: 250f);
-        UIKit.AddButton(row3, Loc.Get("ui.imager.fix"), OnFix, 70f, 30f);
-        _fixLabel = UIKit.AddLabel(row3, "", t.fontSizeSmall, t.textDim);
+        RectTransform row2b = UIKit.Node("Row2b", parent);
+        UIKit.HStack(row2b, 6f, 0, expandWidth: true);
+        _gainLabel = Stepper(row2b, "GAIN", () => AdjustGain(-0.25f), () => AdjustGain(0.25f));
+        _expLabel = Stepper(row2b, "EXP", () => AdjustExposure(-0.25f), () => AdjustExposure(0.25f));
+
+        RectTransform row3a = UIKit.Node("Row3a", parent);
+        var h3a = UIKit.HStack(row3a, 6f, 0);
+        h3a.childAlignment = TextAnchor.MiddleLeft;
+        StepperButtons(row3a, "AZ", () => SlewManual(-StepFovFraction * EffectiveFov(), 0f), () => SlewManual(StepFovFraction * EffectiveFov(), 0f));
+        StepperButtons(row3a, "EL", () => SlewManual(0f, -StepFovFraction * EffectiveFov()), () => SlewManual(0f, StepFovFraction * EffectiveFov()));
+
+        _aimLabel = UIKit.AddLabel(parent, "", t.fontSizeSmall, t.text);
+
+        RectTransform row3b = UIKit.Node("Row3b", parent);
+        var h3b = UIKit.HStack(row3b, 6f, 0);
+        h3b.childAlignment = TextAnchor.MiddleLeft;
+        UIKit.AddButton(row3b, Loc.Get("ui.imager.fix"), OnFix, 70f, 30f);
+        _fixLabel = UIKit.AddLabel(row3b, "", t.fontSizeSmall, t.textDim);
         UIKit.Size(_fixLabel.rectTransform, flexibleWidth: 1f);
     }
 

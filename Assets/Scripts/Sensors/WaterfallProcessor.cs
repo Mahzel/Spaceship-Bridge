@@ -127,11 +127,11 @@ public sealed class WaterfallProcessor
         while (_accumulator >= wait)
         {
             _accumulator -= wait;
-            GenerateLine();
+            GenerateLine(warp);
         }
     }
 
-    private void GenerateLine()
+    private void GenerateLine(float warp)
     {
         double simTime = Game.Clock != null ? Game.Clock.SimSeconds : Time.timeAsDouble;
         float  heading = Game.State != null ? (float)Game.State.Ship.headingDeg : 0f;
@@ -165,7 +165,7 @@ public sealed class WaterfallProcessor
         float[] lineData;
         if (IntegrationOn)
         {
-            lineData = Integrate(cfarNoise);
+            lineData = Integrate(cfarNoise, warp);
         }
         else
         {
@@ -243,10 +243,21 @@ public sealed class WaterfallProcessor
         return mean + stddev * normal;
     }
 
-    private float[] Integrate(float[] line)
+    /// <summary>Integrates the last N lines for SNR gain - but N is capped by SIM-TIME span, not line count.
+    /// wait (the real-seconds gap Tick() leaves between lines) already shrinks as 1/warp down to
+    /// minUpdateInterval's floor, so past that floor every extra line represents minUpdateInterval*warp more
+    /// SIM seconds, unbounded as warp climbs - spec.maxIntegration lines can span many times more sky-sweep at
+    /// 60x than at 1x. A body drifting fast in world bearing (own orbital motion near a primary, not just a
+    /// moving target) then gets smeared across enough bins for CFAR to read it as more than one peak - the
+    /// "ghost contact" a high-drift-rate pass at high warp used to produce. Capping the window at roughly
+    /// maxIntegration/warp keeps the SIM-time span (and therefore the smear) close to warp-1 behaviour
+    /// instead of growing with it; integration gain drops off at high warp as a result, matching an actual
+    /// sensor - you can't usefully integrate a fast sweep by staring at it for a simulated eternity.</summary>
+    private float[] Integrate(float[] line, float warp)
     {
         _integrator.Add(line);
-        while (_integrator.Count > spec.maxIntegration)
+        int cap = Mathf.Max(1, Mathf.RoundToInt(spec.maxIntegration / Mathf.Max(1f, warp)));
+        while (_integrator.Count > cap)
             _integrator.RemoveAt(0);
 
         float[] outline = new float[line.Length];

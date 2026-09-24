@@ -191,9 +191,10 @@ public static class Loc
         { "ui.node.warp.cancel",      "CANCEL WARP" },
         { "ui.node.queue",            "Node in {0:F1} d   dv {1:F2} km/s   ({2} queued)" },
         { "ui.node.queue.none",       "No node armed." },
+        { "ui.node.arm.hint",         "ARM queues the hand-set burn above (set PROGRADE/NORMAL first). PLOT TRANSFER and CREATE NODES (NAV tab) queue their own burns immediately - no separate ARM needed, and ARM here would replace them." },
         { "ui.node.target",           "TARGET: {0}" },
         { "ui.node.target.none",      "TARGET: none selected" },
-        { "ui.node.transfer",         "PLOT TRANSFER" },
+        { "ui.node.transfer",         "PLOT + ARM TRANSFER" },
         { "ui.node.transfer.header",  "TRANSFER" },
 
         // NAV screen
@@ -224,7 +225,7 @@ public static class Loc
         { "ui.nav.transfer.window.open", "WINDOW OPEN NOW" },
         { "ui.nav.transfer.window.wait", "WINDOW IN {0:F1} d" },
         { "ui.nav.transfer.dv",          "dv {0:F2} + {1:F2} km/s   ToF {2:F1} d" },
-        { "ui.nav.transfer.create",      "CREATE NODES" },
+        { "ui.nav.transfer.create",      "CREATE + ARM NODES" },
 
         // Maneuver
         { "ui.maneuver",  "MANEUVER" },

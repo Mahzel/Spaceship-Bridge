@@ -163,6 +163,7 @@ public sealed class NavScreen
         v.childAlignment = TextAnchor.UpperLeft;
 
         _incl = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.text);
+        UIKit.Size(_incl.rectTransform, minHeight: 20f);
 
         _dialRect = UIKit.Node("InclDial", inner);
         UIKit.Size(_dialRect, preferredWidth: 300f, minHeight: 160f);
@@ -183,11 +184,24 @@ public sealed class NavScreen
         UIKit.SetButtonActive(_layerTracks, _showTracks);
 
         UIKit.AddSpacer(inner, 6f);
+        // Explicit minHeight on every one of these: they're all built with EMPTY text (RefreshTransfer fills
+        // them in later), and a plain TextMeshProUGUI with no text reports 0 preferredHeight to the
+        // VerticalLayoutGroup at build time. That 0 doesn't reliably get corrected once real text arrives
+        // later (unlike OrbitPanel's labels, which sit on a node that also carries its own ContentSizeFitter -
+        // that extra component is what forces OrbitPanel's re-layout on every text change; this VStack has
+        // none) - the visible symptom was every one of these rows collapsing onto its neighbour, text
+        // literally overlapping. _transferHeader is the one exception with real text from the start, so it
+        // never showed the bug, but it gets the same explicit height for consistency.
         _transferHeader = UIKit.AddLabel(inner, Loc.Get("ui.nav.transfer.header"), t.fontSizeBody, t.accent);
+        UIKit.Size(_transferHeader.rectTransform, minHeight: 26f);
         _transferTarget = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.text);
+        UIKit.Size(_transferTarget.rectTransform, minHeight: 20f);
         _transferPhase  = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.textDim);
+        UIKit.Size(_transferPhase.rectTransform, minHeight: 20f);
         _transferWindow = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.textDim);
+        UIKit.Size(_transferWindow.rectTransform, minHeight: 20f);
         _transferDv     = UIKit.AddLabel(inner, "", t.fontSizeSmall, t.text);
+        UIKit.Size(_transferDv.rectTransform, minHeight: 20f);
         _transferButton = UIKit.AddButton(inner, Loc.Get("ui.nav.transfer.create"), CreateTransferNodes, 0f, 34f);
 
         // Marker labels: a fixed handful, positioned over the map each redraw. No label-declutter yet

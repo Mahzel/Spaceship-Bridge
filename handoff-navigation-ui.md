@@ -384,3 +384,46 @@ numbers land in a sane ballpark before trusting CREATE NODES.
 - Target orbit fit has no uncertainty visualization yet (the roadmap's "dashed, widening with sigma" ellipse
   from item 6) - CREATE NODES uses the point estimate only. The NAV map doesn't draw the fitted ellipse at
   all yet, only the sidebar's numbers.
+
+## Progress (this session - three bugs reported from an actual play session)
+
+- **NAV sidebar TRANSFER text overlap:** `UI/NavScreen.cs`'s TARGET/PHASE/WINDOW/dV rows (and `_incl`)
+  are built with EMPTY text at `Build()` time (`RefreshTransfer`/`Refresh` fill them in later); a plain
+  `TextMeshProUGUI` with no text reports 0 `preferredHeight` to its `VerticalLayoutGroup`, and that 0 doesn't
+  reliably get corrected once real text lands, unlike `OrbitPanel`'s labels (which sit on a node that also
+  carries its own `ContentSizeFitter` - that's what forces ITS re-layout on every text change; this sidebar's
+  `inner` VStack has no such component). Symptom: every one of those rows rendered on top of its neighbour.
+  Fixed by giving each of those labels an explicit `minHeight` via `UIKit.Size`, so their row height no
+  longer depends on TMA's on-demand preferred-size timing at all. Scoped to the labels actually reported
+  broken (plus `_incl`, same latent shape); worth keeping in mind as a general trap for any OTHER
+  empty-at-build, VStack-only (no ContentSizeFitter) label added later in this codebase.
+- **ARM silently clobbering a plotted transfer:** `ManeuverPlan` has no "planned vs armed" distinction -
+  `SetPair`/`SetSingle` both write directly into the one live queue `Tick()` auto-fires from the instant sim
+  time reaches it (see the class's own doc comment: queuing IS arming). `NavScreen.CreateTransferNodes` and
+  `NodePanel.PlotTransfer` both already call `SetPair` themselves, so a plotted transfer is armed the moment
+  it's created - no extra step needed. `NodePanel.Arm()` is a SEPARATE affordance (hand-set prograde/normal
+  steppers, both default 0) writing to that same queue via `SetSingle`; pressing it after already plotting a
+  transfer, without having touched the steppers, silently replaced the real two-burn plan with a burn that
+  does nothing (`ManeuverPlan.Execute` already no-ops below its dv floor) - the node still gets popped off the
+  queue when its time arrives, so it looked exactly like "the burn doesn't get executed". Fixed by refusing to
+  arm a zero-dv node in `NodePanel.Arm()`; also relabelled `CREATE NODES` -> `CREATE + ARM NODES` and
+  `PLOT TRANSFER` -> `PLOT + ARM TRANSFER`, and added a hint line under NodePanel's own ARM row spelling out
+  that it queues a SEPARATE hand-set burn, not a confirm step for what's already plotted. The user's ask (an
+  actual PLANNED-vs-ARMED state, so nothing fires until an explicit confirm) is a bigger `ManeuverPlan`
+  change, not done here - flagging it as a real design question for a later pass, not just a UI polish one.
+- **Waterfall "ghost contact" at high time-warp with a fast-drifting body:** `WaterfallProcessor.Tick`'s
+  cadence (`wait = max(minUpdateInterval, lineIntervalSeconds / warp)`) already scales with warp, but its
+  `Integrate()` window (`spec.maxIntegration` lines) didn't - past `wait`'s floor, every extra generated line
+  represents `minUpdateInterval * warp` more SIM seconds, unbounded as warp climbs. A body sweeping fast in
+  world bearing (own orbital motion near a primary counts, not just a moving target - exactly the close-orbit
+  transfer scenario this session's earlier `OrbitFit` work is built around) then gets smeared, while
+  integrated, across enough bins for CFAR (`Tracking/Detector.cs`) to read the smear as more than one local
+  maximum. Fixed by capping the integrator at `spec.maxIntegration / warp` lines instead of a flat count, so
+  the SIM-TIME SPAN it covers stays close to warp-1 behaviour instead of growing with warp; integration gain
+  drops off at high warp as a direct consequence (matches a real sensor - you can't usefully integrate a fast
+  sweep by staring at it for a simulated eternity). `WaterfallProcessor.GenerateLine`/`Integrate` both now take
+  `warp` as a parameter instead of reading it implicitly.
+
+**Not compile-checked**, same as everything else in this file. The waterfall fix in particular is worth a
+specific in-Editor check: warp up while tracking something with a fast-changing bearing (a close lunar
+transfer is exactly the repro) and confirm only one track/contact appears, not a duplicate.

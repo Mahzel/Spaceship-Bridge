@@ -93,6 +93,9 @@ public sealed class NodePanel
         _warpLabel = _warpButton.GetComponentInChildren<TextMeshProUGUI>();
 
         _queueLine = UIKit.AddLabel(root, "", t.fontSizeSmall, t.text);
+        TextMeshProUGUI armHint = UIKit.AddLabel(root, Loc.Get("ui.node.arm.hint"), t.fontSizeSmall, t.textDim);
+        armHint.textWrappingMode = TextWrappingModes.Normal;
+        UIKit.Size(armHint.rectTransform, preferredWidth: 380f);
 
         // --- Transfer to selected target -------------------------------------------
         UIKit.AddLabel(root, Loc.Get("ui.node.transfer.header"), t.fontSizeSmall, t.accent);
@@ -109,10 +112,19 @@ public sealed class NodePanel
     /// WARP TO NODE - it just vanished, taking the warp button's interactability with it. Only an offset the
     /// player picked ON PURPOSE (a +preset, or an explicit NOW click) may still be 0; an untouched panel gets
     /// bumped to the first preset instead of silently instant-firing.
+    ///
+    /// Also refuses to arm a ZERO-dv node (both steppers still at their default 0): this button and PLOT
+    /// TRANSFER/CREATE NODES all write to the SAME single queue (ManeuverPlan has no separate "planned" vs
+    /// "armed" state - queuing IS arming, see its own doc comment), so pressing this ARM button untouched,
+    /// after already plotting a transfer, used to silently REPLACE the real transfer plan with a burn that
+    /// does nothing (Execute already no-ops below the dv floor) - the node still gets popped and "consumed"
+    /// off the queue when its time arrives, so it looked exactly like "the burn didn't execute". If you want
+    /// to hand-set a burn, touch the PROGRADE/NORMAL steppers first.
     /// </summary>
     private void Arm()
     {
         if (Game.State == null || Game.Clock == null) return;
+        if (Mathf.Abs(_progradeKmS) < 1e-6f && Mathf.Abs(_normalKmS) < 1e-6f) return;
         if (!_timeChosen) _offsetSeconds = TimePresets[0].mult;
         double when = Game.Clock.SimSeconds + _offsetSeconds;
         Game.State.Maneuver.SetSingle(when, _progradeKmS, _normalKmS);

@@ -626,15 +626,18 @@ numbers." User picked this to work on next (while away from a testing environmen
   (nothing selected, unranged, no primary in common, a degenerate fit) - the two can't disagree, since both
   gate on the same `OrbitFit.TryFit` call.
 
-**Not done this pass, explicitly deferred rather than rushed:** the OTHER half of what item 6/item 3 together
-describe - the SHIP's own predicted post-burn path drawn on the map (so CREATE NODES / a queued node previews
-its resulting orbit visually, not just as the sidebar's PERI/APO/e/i numbers `ManeuverPlan.PreviewNode`
-already computes). `PreviewNode` currently returns only summary numbers (periapsis/apoapsis/eccentricity/
-inclination/period), not a full `OrbitElements` (no argument-of-periapsis/longitude-of-ascending-node/mean-
-anomaly - the orientation a redrawn ellipse actually needs), so drawing it means extending `PreviewNode` the
-same way `OrbitFit.TryFit` gained its primary-name overload: add elements out, keep the existing callers
-(`NodePanel.Refresh`) on the summary-only version. Natural next step if there's appetite for more NAV map work.
+**Update, same session:** the deferred half got done too - `ManeuverPlan.Preview` gained an `elements` field
+(the full `OrbitElements`, populated in `PreviewNode` alongside the summary numbers it already returned;
+`NodePanel`'s existing callers are untouched, they just don't read the new field). `NavScreen.Draw()` gained
+`DrawPredictedPathLayer`, called whenever `Game.State.Maneuver.Armed`: previews the NEXT queued node
+(`ManeuverPlan.Next`) with the exact same `PreviewNode` call `NodePanel`'s own PERI/APO/e/i readout already
+uses, and draws the resulting orbit as a dashed ellipse in `navNode` yellow (reuses `DrawFittedEllipse`, the
+same helper the uncertainty-ellipse work above added) - so a queued node now visibly previews its own result
+on the map, not just as sidebar numbers, satisfying roadmap item 3's "predicted path" alongside item 6's
+uncertainty band. Own-ship data, so no fit/uncertainty band on this one - it's either armed or it isn't.
 
-**Not compile-checked**, same caveat as everywhere else in this file. Worth an in-Editor look at whether the
-+/-sigma band ellipses are visually distinguishable from the central fit at typical zoom (too close together
-to read as a band vs. just a thicker line) and whether `band.a *= 0.35f` reads as intended in both themes.
+**Not compile-checked**, same caveat as everywhere else in this file. Worth an in-Editor look at: whether the
++/-sigma band ellipses are visually distinguishable from the central target-orbit fit at typical zoom (too
+close together to read as a band vs. just a thicker line); whether `band.a *= 0.35f` reads as intended in both
+themes; and whether the predicted-path ellipse and a selected track's own fitted-orbit ellipse stay visually
+distinct when both are on screen at once (navNode yellow vs. whatever WaterfallTrackColor gave the track).

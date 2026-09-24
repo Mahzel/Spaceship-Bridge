@@ -31,6 +31,9 @@ public sealed class ManeuverPlan
         public bool   valid;
         public float  periapsisAu, apoapsisAu, eccentricity, inclinationDeg;
         public double periodDays;
+        /// <summary>Full elements, orientation included - NodePanel only ever needed the summary numbers above,
+        /// but NavScreen's predicted-path drawing needs the whole conic to redraw it correctly.</summary>
+        public OrbitElements elements;
     }
 
     private const int MaxQueue = 2;
@@ -193,7 +196,8 @@ public sealed class ManeuverPlan
             apoapsisAu     = elements.semiMajorAxis * (1f + elements.eccentricity) / gu,
             eccentricity   = elements.eccentricity,
             inclinationDeg = elements.inclination,
-            periodDays     = elements.orbitalPeriod / 86400.0
+            periodDays     = elements.orbitalPeriod / 86400.0,
+            elements       = elements
         };
     }
 

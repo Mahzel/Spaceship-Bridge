@@ -398,6 +398,10 @@ public sealed class NavScreen
             shipScreen = toScreen(shipRel);
         }
 
+        // Predicted path (roadmap item 3): the ship's own orbit AFTER its next queued burn fires, dashed so it
+        // reads as "not yet real" next to the current solid conic. Nothing drawn while nothing's armed.
+        DrawPredictedPathLayer(toScreen);
+
         // Track layer (roadmap item 2): under the live ship marker, over the catalogue/orbit lines.
         DrawTrackLayer(orbit, shipScreen, toScreen);
 
@@ -479,6 +483,22 @@ public sealed class NavScreen
             DrawFittedEllipse(wide, toScreen, 1f, band);
             DrawFittedEllipse(narrow, toScreen, 1f, band);
         }
+    }
+
+    /// <summary>Roadmap item 3's predicted path: the ship's own orbit after its NEXT queued burn fires
+    /// (ManeuverPlan.PreviewNode, the exact same non-destructive preview NodePanel's own PERI/APO/e/i readout
+    /// already uses - this just also draws the shape it describes). Own-ship data, not a track, so no fit or
+    /// uncertainty band - it's either armed or it isn't.</summary>
+    private void DrawPredictedPathLayer(Func<Vector3, Vector2> toScreen)
+    {
+        ManeuverPlan mp = Game.State != null ? Game.State.Maneuver : null;
+        if (mp == null || !mp.Armed || mp.Next == null) return;
+
+        ManeuverPlan.Node next = mp.Next.Value;
+        ManeuverPlan.Preview p = ManeuverPlan.PreviewNode(next.simSeconds, next.progradeKmS, next.normalKmS);
+        if (!p.valid) return;
+
+        DrawFittedEllipse(p.elements, toScreen, 2f, UITheme.Current.navNode);
     }
 
     private void DrawFittedEllipse(in OrbitElements el, Func<Vector3, Vector2> toScreen, float width, Color color)

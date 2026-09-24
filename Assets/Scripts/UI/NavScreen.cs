@@ -18,8 +18,10 @@ using UnityEngine.UI;
 /// (roadmap item 5) previews and arms a Hohmann transfer to that target: phase angle now vs. the next window,
 /// wait time, Δv and time of flight (ManeuverPlan.ComputeTransferWindow), then CREATE NODES arms the same
 /// two-burn plan NodePanel's "plot a transfer" does (ManeuverPlan.SolveHohmann) but timed to the window
-/// instead of firing from right now. Node placement on the map itself, the predicted-path overlay, the
-/// timeline and the galaxy map are later items on the same roadmap and are NOT drawn here yet.
+/// instead of firing from right now. The target's orbit is never looked up from NodeData/the catalogue: it's
+/// OrbitFit.TryFit off the selected track's own range estimate, so no identification is required (a range is
+/// enough) and a bad fit makes a bad burn, on purpose. Node placement on the map itself, the predicted-path
+/// overlay, the timeline and the galaxy map are later items on the same roadmap and are NOT drawn here yet.
 ///
 /// Top-down (world X, Z - see KeplerOrbit's rotation: Y is the out-of-plane axis, so a pure XZ projection is
 /// exactly the ecliptic view every other screen already uses). Inclination doesn't show as tilt in a top-down
@@ -50,8 +52,9 @@ public sealed class NavScreen
     // Screen position of every track drawn this redraw, for click-to-select (DrawTrackLayer fills it, OnMapClicked reads it).
     private readonly List<(int id, Vector2 pos)> _trackHits = new List<(int, Vector2)>();
 
-    // Transfer helper (roadmap item 5): reads Game.State.TargetBodyName, the same target SystemScreen sets
-    // when the player selects an identified track there (or a track clicked directly on this map).
+    // Transfer helper (roadmap item 5): reads Game.State.Tracks.SelectedId, the same selection SystemScreen
+    // sets when the player clicks a track there (or a track clicked directly on this map) - no identification
+    // required, see OrbitFit. TargetBodyName is only read for the display label.
     private TextMeshProUGUI _transferHeader, _transferTarget, _transferPhase, _transferWindow, _transferDv;
     private Button _transferButton;
 
@@ -131,7 +134,9 @@ public sealed class NavScreen
         TrackManager tm = Game.State.Tracks;
         tm.SelectedId = bestId;
         Track tr = tm.Find(bestId);
-        Game.State.SetTarget(tr != null && tr.info.identified ? tr.info.catalogName : null);
+        // Display only - the transfer math (RefreshTransfer/CreateTransferNodes) reads the selected track's
+        // own OrbitFit, not this name. No identification required, just a range.
+        Game.State.SetTarget(tr != null ? tr.name : null);
     }
 
     private void BuildSidebar(Transform parent, UITheme t)
@@ -555,15 +560,17 @@ public sealed class NavScreen
     }
 
     /// <summary>Roadmap item 5 (transfer helper): phase angle now vs. the window, wait time, Δv and time of
-    /// flight for a Hohmann transfer to Game.State.TargetBodyName - the same target field SystemScreen sets
-    /// (and OnMapClicked above sets from a track clicked directly on this map). Read-only; CreateTransferNodes
-    /// is the only thing that commits it. Runs every redraw tick, independent of whether the ship's own orbit
-    /// has a trajectory, so the panel stays live even while that's blank.</summary>
+    /// flight for a Hohmann transfer to the selected track (Game.State.Tracks.SelectedId - the same selection
+    /// SystemScreen's row click and OnMapClicked above both drive). The orbit itself comes from OrbitFit.TryFit
+    /// off that track's own range estimate, never a catalog/NodeData lookup - no identification required, just
+    /// a usable range. Read-only; CreateTransferNodes is the only thing that commits it. Runs every redraw
+    /// tick, independent of whether the ship's own orbit has a trajectory, so the panel stays live even while
+    /// that's blank.</summary>
     private void RefreshTransfer()
     {
         GameState state = Game.State;
-        string targetName = state != null ? state.TargetBodyName : null;
-        if (string.IsNullOrEmpty(targetName))
+        Track tr = state != null ? state.Tracks.Find(state.Tracks.SelectedId) : null;
+        if (tr == null)
         {
             UIKit.SetText(_transferTarget, Loc.Get("ui.nav.transfer.none"));
             UIKit.SetText(_transferPhase, "");
@@ -572,13 +579,19 @@ public sealed class NavScreen
             _transferButton.interactable = false;
             return;
         }
-        UIKit.SetText(_transferTarget, Loc.Get("ui.nav.transfer.target", targetName));
+        UIKit.SetText(_transferTarget, Loc.Get("ui.nav.transfer.target", tr.name));
 
-        SystemManager sm = SystemManager.Current;
-        NodeData target = sm != null ? FindTarget(sm.CurrentData, targetName) : null;
+        if (!OrbitFit.TryFit(tr, out OrbitElements target))
+        {
+            UIKit.SetText(_transferPhase, Loc.Get("ui.nav.transfer.unavailable"));
+            UIKit.SetText(_transferWindow, "");
+            UIKit.SetText(_transferDv, "");
+            _transferButton.interactable = false;
+            return;
+        }
+
         double now = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
-        ManeuverPlan.TransferWindow w = target != null ? ManeuverPlan.ComputeTransferWindow(target, now) : default;
-
+        ManeuverPlan.TransferWindow w = ManeuverPlan.ComputeTransferWindow(target, now);
         if (!w.valid)
         {
             UIKit.SetText(_transferPhase, Loc.Get("ui.nav.transfer.unavailable"));
@@ -596,30 +609,21 @@ public sealed class NavScreen
         _transferButton.interactable = true;
     }
 
-    /// <summary>Recomputes the window fresh (it may have shifted since the last redraw tick) and arms the two
-    /// burns it produces - NodePanel's own "plot a transfer" arms departure at NOW (phase-blind); this waits
-    /// for the window ComputeTransferWindow found, same ManeuverPlan.SolveHohmann underneath.</summary>
+    /// <summary>Recomputes the fit and the window fresh (both may have shifted since the last redraw tick) and
+    /// arms the two burns SolveHohmann produces - NodePanel's own "plot a transfer" arms departure at NOW
+    /// (phase-blind); this waits for the window ComputeTransferWindow found.</summary>
     private void CreateTransferNodes()
     {
         GameState state = Game.State;
-        if (state == null || string.IsNullOrEmpty(state.TargetBodyName) || Game.Clock == null) return;
-        SystemManager sm = SystemManager.Current;
-        NodeData target = sm != null ? FindTarget(sm.CurrentData, state.TargetBodyName) : null;
-        if (target == null) return;
+        if (state == null || Game.Clock == null) return;
+        Track tr = state.Tracks.Find(state.Tracks.SelectedId);
+        if (tr == null || !OrbitFit.TryFit(tr, out OrbitElements target)) return;
 
         ManeuverPlan.TransferWindow w = ManeuverPlan.ComputeTransferWindow(target, Game.Clock.SimSeconds);
         if (!w.valid) return;
 
         if (ManeuverPlan.SolveHohmann(target, w.departSimSeconds, out ManeuverPlan.Node departure, out ManeuverPlan.Node arrival))
             state.Maneuver.SetPair(departure, arrival);
-    }
-
-    private static NodeData FindTarget(SystemData sys, string name)
-    {
-        if (sys == null || string.IsNullOrEmpty(name)) return null;
-        foreach (NodeData n in sys.nodes)
-            if (n.name == name) return n;
-        return null;
     }
 
     private void AutoFit(ShipOrbit orbit)

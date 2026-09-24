@@ -232,31 +232,33 @@ public sealed class ManeuverPlan
 
     /// <summary>
     /// Basic two-burn coplanar-approximation Hohmann transfer from the ship's current orbit (treated as
-    /// circular at its current semi-major axis) to a target body's orbit around the SAME primary. Not an
-    /// optimal solver: it doesn't time the plane-change component to the true line of nodes, just folds a
-    /// rough plane-change delta-v into the arrival burn's normal axis. departureSimSeconds is when the
-    /// departure burn fires - pass "now" for an immediate (phase-blind) transfer, or
+    /// circular at its current semi-major axis) to a target's orbit around the SAME primary. `target` is an
+    /// element set the CALLER already has - deliberately not looked up from NodeData/the catalogue here:
+    /// the only legitimate source for another body's orbit is what the player has actually measured
+    /// (OrbitFit.TryFit, from a track's own range estimate). A bad fit makes a bad burn; that's the game.
+    /// Not an optimal solver: it doesn't time the plane-change component to the true line of nodes, just
+    /// folds a rough plane-change delta-v into the arrival burn's normal axis. departureSimSeconds is when
+    /// the departure burn fires - pass "now" for an immediate (phase-blind) transfer, or
     /// ComputeTransferWindow's DepartSimSeconds to wait for the window that actually meets the target.
     /// </summary>
-    public static bool SolveHohmann(NodeData target, double departureSimSeconds, out Node departure, out Node arrival)
+    public static bool SolveHohmann(in OrbitElements target, double departureSimSeconds, out Node departure, out Node arrival)
     {
         departure = default;
         arrival   = default;
 
         ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
-        if (orbit == null || !orbit.Valid || target == null || !target.hasOrbit) return false;
-        if (target.parent != orbit.PrimaryIndex) return false; // basic solver: same primary only
+        if (orbit == null || !orbit.Valid || target.orbitalPeriod <= 0.0) return false;
 
         double mu = orbit.Mu;
         float  r1 = orbit.Elements.semiMajorAxis;
-        float  r2 = target.orbit.semiMajorAxis;
+        float  r2 = target.semiMajorAxis;
         if (r1 <= 0f || r2 <= 0f || mu <= 0.0) return false;
 
         HohmannGeometry g = SolveHohmannGeometry(mu, r1, r2);
 
         // Rough plane-change, folded into the arrival burn rather than timed to the true line of nodes.
         double v2Circ = Math.Sqrt(mu / r2);
-        float inclDeltaDeg = Mathf.Abs(target.orbit.inclination - orbit.Elements.inclination);
+        float inclDeltaDeg = Mathf.Abs(target.inclination - orbit.Elements.inclination);
         double dvPlane = 2.0 * v2Circ * Math.Sin(inclDeltaDeg * Mathf.Deg2Rad / 2.0);
 
         float kmPerUnit = (float)ShipState.KmPerUnit; // game-units/simSecond -> km/s
@@ -280,7 +282,7 @@ public sealed class ManeuverPlan
     /// ends, not just "some point on its orbit". SolveHohmann itself is phase-blind (it'll compute correct
     /// burn sizes for a transfer starting right now, but the target usually won't be there yet); this is what
     /// lets a caller wait for DepartSimSeconds before arming those burns. Same coplanar-circular assumptions
-    /// as SolveHohmann (and the same "same primary" requirement).</summary>
+    /// as SolveHohmann, and the same "target is an already-fitted OrbitElements, never a NodeData lookup".</summary>
     public struct TransferWindow
     {
         public bool   valid;
@@ -292,18 +294,17 @@ public sealed class ManeuverPlan
         public float  TotalDvKmS => departureDvKmS + arrivalDvKmS;
     }
 
-    public static TransferWindow ComputeTransferWindow(NodeData target, double nowSimSeconds)
+    public static TransferWindow ComputeTransferWindow(in OrbitElements target, double nowSimSeconds)
     {
         TransferWindow w = default;
 
         ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
-        if (orbit == null || !orbit.Valid || target == null || !target.hasOrbit) return w;
-        if (target.parent != orbit.PrimaryIndex) return w;
+        if (orbit == null || !orbit.Valid || target.orbitalPeriod <= 0.0) return w;
         if (!orbit.RelativeStateAt(nowSimSeconds, out Vector3 shipRel, out Vector3 _)) return w;
 
         double mu = orbit.Mu;
         float  r1 = orbit.Elements.semiMajorAxis;
-        float  r2 = target.orbit.semiMajorAxis;
+        float  r2 = target.semiMajorAxis;
         if (r1 <= 0f || r2 <= 0f || mu <= 0.0) return w;
 
         HohmannGeometry g = SolveHohmannGeometry(mu, r1, r2);
@@ -312,9 +313,9 @@ public sealed class ManeuverPlan
         // burn sizes already use.
         double r1d = r1;
         double n1 = Math.Sqrt(mu / (r1d * r1d * r1d));
-        double n2 = target.orbit.orbitalPeriod > 0.0 ? 2.0 * Math.PI / target.orbit.orbitalPeriod : 0.0;
+        double n2 = target.orbitalPeriod > 0.0 ? 2.0 * Math.PI / target.orbitalPeriod : 0.0;
 
-        Vector3 targetOffsetNow = KeplerOrbit.OffsetAt(target.orbit, nowSimSeconds);
+        Vector3 targetOffsetNow = KeplerOrbit.OffsetAt(target, nowSimSeconds);
         double thetaShip = Math.Atan2(shipRel.z, shipRel.x);
         double thetaTarget = Math.Atan2(targetOffsetNow.z, targetOffsetNow.x);
         double gammaNow = Mod2Pi(thetaTarget - thetaShip);          // target's current lead over the ship
@@ -330,7 +331,7 @@ public sealed class ManeuverPlan
         // Same rough plane-change SolveHohmann folds into the arrival burn - included here too so the
         // previewed Δv matches what CREATE NODES will actually arm.
         double v2Circ = Math.Sqrt(mu / r2);
-        float inclDeltaDeg = Mathf.Abs(target.orbit.inclination - orbit.Elements.inclination);
+        float inclDeltaDeg = Mathf.Abs(target.inclination - orbit.Elements.inclination);
         double dvPlane = 2.0 * v2Circ * Math.Sin(inclDeltaDeg * Mathf.Deg2Rad / 2.0);
         double arrivalDv = Math.Sqrt(g.dv2 * g.dv2 + dvPlane * dvPlane);
 

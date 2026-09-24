@@ -15,8 +15,10 @@ using UnityEngine.UI;
 ///   Ranged     - a usable range from TMA (after a manoeuvre) or radar, with its 1-sigma;
 ///   Identified - spectrometer dwell complete: class, and composition / atmosphere or stellar data.
 /// Clicking a row selects that track everywhere (Track panel, radar TRACK mode, SEL on the imager and
-/// spectrometer). Once the contact is identified, it also becomes the NODE tab's transfer target, which
-/// needs the catalog match to know what to plot to. Purely informational otherwise, so Hide() is a no-op.
+/// spectrometer, the NODE tab and the NAV map's TRANSFER section). A track becomes a usable transfer target
+/// as soon as it has a range (OrbitFit.TryFit off TrackManager.BestRange) - identification is NOT required:
+/// the planner only needs orbital parameters, and a bad fit just means a bad burn. Purely informational
+/// otherwise, so Hide() is a no-op.
 /// </summary>
 public sealed class SystemScreen
 {
@@ -118,8 +120,10 @@ public sealed class SystemScreen
         TrackManager tm = Game.State.Tracks;
         tm.SelectedId = trackId;
         Track tr = tm.Find(trackId);
-        // The NODE tab plots to a catalog body, which only exists once the contact is identified.
-        Game.State.SetTarget(tr != null && tr.info.identified ? tr.info.catalogName : null);
+        // TargetBodyName is display-only now (NodePanel/NavScreen re-derive the actual orbit from the
+        // selected track via OrbitFit) - the track's own name, not a catalog match, so it's set as soon as
+        // there's a track to select at all, no identification required.
+        Game.State.SetTarget(tr != null ? tr.name : null);
     }
 
     /// <summary>Called by SensorConsole when another mode is selected. No-op: purely informational.</summary>

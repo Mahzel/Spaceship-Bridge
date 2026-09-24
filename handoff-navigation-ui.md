@@ -323,3 +323,64 @@ LEO-scale start) before trusting the wait-time numbers.
   new gap, but worth a "target lost" message if it comes up in testing.
 - No warp-to-departure convenience button on the NAV screen itself; `NodePanel`'s existing WARP button (NODE
   tab of `SystemsDock`) already works on the same queue, so this is a nice-to-have, not a blocker.
+
+## Progress (this session - track-derived orbit fit, discarding the NodeData "cheat")
+
+The transfer planner used to look its target up by name in the generated `SystemData` (`NodeData`) -
+omniscient ground truth, gated only by spectrometer identification (so the player could know exactly where
+a body was and where it was going the instant its class resolved, regardless of what the sensors had
+actually measured). Per discussion with the user: that's backwards for an exploration game - the planner
+should only ever see what the ship itself has worked out, uncertainty included, and identification
+shouldn't be a gate on "does this track have a plannable orbit" at all (range is what matters; a bad fit
+making a bad burn is the intended risk, not a bug to route around).
+
+- **`Tracking/OrbitFit.cs`** (new): `TryFit(Track, out OrbitElements)`. Not a new fitting algorithm - the
+  track's `range` (`TrackManager.BestRange`, TMA or radar) already carries a full state vector (TMA's
+  constant-velocity model fits position AND velocity), so this is just: read that state vector, subtract the
+  primary's own position/velocity (`OrbitalMechanics.NodeState`, the same call `ShipOrbit` itself uses) to
+  get it into the primary-relative frame, then `OrbitalMechanics.StateToElements` - the exact conversion
+  `ShipOrbit.Resolve` runs on the ship's own state. It "refines with time" for free: `RangeEstimate.rangeSigma`
+  already shrinks as the ship's own orbital arc builds parallax (this used to need a burn only because the
+  ship coasted in a literal straight line before the `ShipOrbit` rewrite - now that it's genuinely orbiting,
+  TMA converges from that curvature alone, no burn required, matching what the user suspected). Only valid
+  while the target shares the ship's CURRENT primary - a one-hop frame change, not a general solver; a target
+  around a different body isn't handled yet.
+- **`Core/ManeuverPlan.cs`**: `SolveHohmann` and `ComputeTransferWindow` now take `in OrbitElements target`
+  instead of `NodeData target` - `NodeData`/`SystemData` are gone from this file entirely. The caller is
+  responsible for having a legitimately-known orbit (i.e. `OrbitFit.TryFit`'s output); the burn math itself
+  doesn't care where the elements came from, so this also makes the file honestly reusable if a later pass
+  wants to plan against a hand-entered or catalogue-sourced orbit for some other reason.
+  `UI/NodePanel.cs`'s "plot a transfer" and `UI/NavScreen.cs`'s TRANSFER section both now read the SELECTED
+  TRACK (`Game.State.Tracks.SelectedId`) and call `OrbitFit.TryFit` directly - no more catalog-name lookup.
+- **`Display/SystemScreen.cs`** / **`UI/NavScreen.cs`**: `Select`/`OnMapClicked` no longer gate
+  `Game.State.SetTarget` on `tr.info.identified` - a track becomes targetable as soon as it's selected;
+  `TargetBodyName` is now purely a DISPLAY label (the track's own name, not a catalog match) and is never
+  looked up again by the planner. `Core/GameState.cs`'s doc comment on `TargetBodyName` updated to say so.
+- **Not changed**: the catalogue layer (`Core/Catalogue.cs`, roadmap item 2) still reads `NodeData` via
+  `CollectOrbitsAroundPrimary` - that's a different, intentionally-scoped feature (catalogued Sol bodies are
+  genuinely pre-known before the expedition, per `SolSystem`'s own doc comment), not the same "cheat" as
+  looking up an unidentified contact's true orbit. Clicking a catalogue marker still doesn't select anything;
+  only tracks are targetable, on purpose (two-knowledge-tiers principle).
+
+**Not compile-checked** (same batchmode/license-lock issue noted throughout this file). Numerically this is
+low-risk (every formula reused is already exercised elsewhere - `StateToElements` by `ShipOrbit`, `NodeState`
+by `ShipOrbit`/`FindPrimary`, the Hohmann geometry by the existing `SolveHohmann`), but the frame-subtraction
+in `OrbitFit.TryFit` (primary position/velocity subtracted from the track's system-frame estimate) is new
+combination of existing pieces and deserves a specific in-Editor check: track something with an obvious orbit
+(a Sol planet, tracked and ranged but NOT identified), open NAV, and confirm the TRANSFER section's Δv/ToF
+numbers land in a sane ballpark before trusting CREATE NODES.
+
+**Known gaps from this pass:**
+- `DevHud`'s "Set NAV target" debug button (`Core/DevHud.cs`) only sets the display-only `TargetBodyName` now
+  - it never drove `Tracks.SelectedId`, so it was already a display-only shortcut in spirit; now it's also
+    functionally inert for actually plotting a transfer (the planner needs a selected TRACK, not a name). Low
+    priority (dev-only tool), but worth wiring to `Tracks.SelectedId` too if DevHud's transfer-testing flow is
+    used often.
+- `OrbitFit`'s "no blending across samples" simplification (see its own doc comment) means a very long,
+  uncorrected track will eventually see its fit quality degrade again as the target's own orbital curvature
+  breaks the TMA's straight-line-target assumption, rather than continuing to sharpen forever. Not wrong, but
+  worth confirming the degradation is graceful (`Observable` just goes false) rather than producing a
+  confidently-wrong orbit.
+- Target orbit fit has no uncertainty visualization yet (the roadmap's "dashed, widening with sigma" ellipse
+  from item 6) - CREATE NODES uses the point estimate only. The NAV map doesn't draw the fitted ellipse at
+  all yet, only the sidebar's numbers.

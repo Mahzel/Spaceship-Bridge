@@ -6,8 +6,9 @@ using UnityEngine.UI;
 /// The NODE tab of SystemsDock: plan a maneuver node (a time plus prograde/retrograde and normal
 /// delta-v), preview the orbit it would produce without touching the ship, arm it so ManeuverPlan fires it
 /// automatically when simulated time reaches it, and optionally warp straight there. Also hosts "plot a
-/// transfer" - a basic Hohmann solver to whatever body is selected on the SYSTEM screen (Game.State.
-/// TargetBodyName, set by clicking a row there).
+/// transfer" - a basic Hohmann solver to whatever track is selected (Track panel, SYSTEM screen or the NAV
+/// map all set TrackManager.SelectedId). Uses OrbitFit.TryFit off the track's own range estimate, never a
+/// catalog/NodeData lookup - no identification required, just a usable range (see OrbitFit's doc).
 /// </summary>
 public sealed class NodePanel
 {
@@ -133,25 +134,17 @@ public sealed class NodePanel
         else mp.StartWarpToNode();
     }
 
+    /// <summary>Plots to whatever track is selected, using ONLY what it has itself measured (OrbitFit.TryFit,
+    /// off the track's own range estimate) - never a catalog/NodeData lookup. No identification required:
+    /// range is enough to have a rough orbit and a rough burn. A bad fit makes a bad burn; that's the game.</summary>
     private void PlotTransfer()
     {
         if (Game.State == null || Game.Clock == null) return;
-        SystemManager sm = SystemManager.Current;
-        if (sm == null || sm.CurrentData == null) return;
-
-        NodeData target = FindTarget(sm.CurrentData, Game.State.TargetBodyName);
-        if (target == null) return;
+        Track tr = Game.State.Tracks.Find(Game.State.Tracks.SelectedId);
+        if (tr == null || !OrbitFit.TryFit(tr, out OrbitElements target)) return;
 
         if (ManeuverPlan.SolveHohmann(target, Game.Clock.SimSeconds, out ManeuverPlan.Node departure, out ManeuverPlan.Node arrival))
             Game.State.Maneuver.SetPair(departure, arrival);
-    }
-
-    private static NodeData FindTarget(SystemData sys, string name)
-    {
-        if (sys == null || string.IsNullOrEmpty(name)) return null;
-        foreach (NodeData n in sys.nodes)
-            if (n.name == name) return n;
-        return null;
     }
 
     public void Refresh()

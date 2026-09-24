@@ -65,8 +65,11 @@ public sealed class GameState
     // them. Ticked every frame by RunDriver, alongside ShipOrbit's own advance. -----------------------------
     public readonly ManeuverPlan Maneuver = new ManeuverPlan();
 
-    /// <summary>Body name selected on the SYSTEM screen for "plot a transfer to X" (ManeuverPlan.SolveHohmann).
-    /// Null/empty until the player clicks a row. Not persisted across a system jump (see ResetProbe/SystemManager).</summary>
+    /// <summary>Display name of the track selected as the transfer target (SYSTEM screen, NODE tab or the NAV
+    /// map - all three set Tracks.SelectedId + this together). Display only: the actual orbit the planner
+    /// (ManeuverPlan.SolveHohmann) uses comes from OrbitFit.TryFit on the selected track itself, never a
+    /// lookup by this name. Null/empty until the player selects a track. Not persisted across a system jump
+    /// (see ResetProbe/SystemManager).</summary>
     public string TargetBodyName { get; private set; }
 
     public void SetTarget(string name)

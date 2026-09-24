@@ -29,6 +29,7 @@ MonoBehaviour:
   navBody: {r: 0.85, g: 0.85, b: 0.6, a: 1}
   navNode: {r: 1, g: 0.85, b: 0.3, a: 1}
   navPlane: {r: 0.55, g: 0.7, b: 1, a: 1}
+  navCatalogue: {r: 0.85, g: 0.85, b: 0.6, a: 0.55}
   buttonNormal: {r: 0.06, g: 0.14, b: 0.08, a: 1}
   buttonHover: {r: 0.12, g: 0.24, b: 0.14, a: 1}
   buttonPressed: {r: 0.04, g: 0.1, b: 0.05, a: 1}

@@ -52,4 +52,36 @@ public static class Catalogue
         }
         return best;
     }
+
+    /// <summary>One catalogued body's orbit, as the NAV map's catalogue layer needs it: name, its elements
+    /// (relative to its own parent) and radius. Never the live CelestialBody/SensorSight - see
+    /// handoff-navigation-ui.md's "the map must never call SensorSight" rule.</summary>
+    public struct CataloguedOrbit
+    {
+        public string name;
+        public OrbitElements orbit;
+        public float radiusGame;
+    }
+
+    /// <summary>Catalogued bodies of the current system whose PARENT is `primaryIndex` - the set the NAV map can
+    /// draw as orbit ellipses around the same focus the ship's own orbit is already drawn around (see
+    /// ShipOrbit.PrimaryIndex). Reads only the Atlas and the deterministic generated SystemData (the probe's
+    /// ephemeris stand-in, same data SolSystem/SystemFactory built at system-generation time) - never a live
+    /// CelestialBody transform.</summary>
+    public static void CollectOrbitsAroundPrimary(int primaryIndex, List<CataloguedOrbit> result)
+    {
+        result.Clear();
+        if (Game.State == null) return;
+        SystemManager sm = SystemManager.Current;
+        if (sm == null || sm.CurrentData == null) return;
+        string sys = sm.CurrentData.id;
+        List<NodeData> nodes = sm.CurrentData.nodes;
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            NodeData n = nodes[i];
+            if (!n.hasOrbit || n.parent != primaryIndex) continue;
+            if (Game.State.Atlas.FindCatalogued(sys, n.name) == null) continue;
+            result.Add(new CataloguedOrbit { name = n.name, orbit = n.orbit, radiusGame = n.radiusGame });
+        }
+    }
 }

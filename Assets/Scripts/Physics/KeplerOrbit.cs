@@ -44,14 +44,28 @@ public static class KeplerOrbit
                                      Math.Sqrt(1.0 - e) * Math.Cos(E / 2.0));
 
         double r    = o.semiMajorAxis * (1.0 - e * Math.Cos(E));
-        double xOrb = r * Math.Cos(nu);
-        double yOrb = r * Math.Sin(nu);
+        return Rotate(o, r * Math.Cos(nu), r * Math.Sin(nu));
+    }
 
+    /// <summary>Offset from the focus at a given true anomaly (radians) - a pure function of the ellipse's shape,
+    /// not of time. Lets a map trace the whole orbit by sampling anomaly directly (so periapsis can be sampled
+    /// as densely as apoapsis) instead of walking simulated time. Mirrors ShipOrbit.OffsetAtTrueAnomaly, for the
+    /// catalogue layer's own bodies.</summary>
+    public static Vector3 OffsetAtTrueAnomaly(in OrbitElements o, double nu)
+    {
+        double e = Math.Min(Math.Max(o.eccentricity, 0.0), 0.99);
+        double p = o.semiMajorAxis * (1.0 - e * e);
+        double r = p / (1.0 + e * Math.Cos(nu));
+        return Rotate(o, r * Math.Cos(nu), r * Math.Sin(nu));
+    }
+
+    // Perifocal (xOrb, yOrb) -> world rotation, shared by OffsetAt/OffsetAtTrueAnomaly/StateAt.
+    private static Vector3 Rotate(in OrbitElements o, double xOrb, double yOrb)
+    {
         double cosO = Math.Cos(o.longitudeAscNode  * Deg2Rad), sinO = Math.Sin(o.longitudeAscNode  * Deg2Rad);
         double cosI = Math.Cos(o.inclination       * Deg2Rad), sinI = Math.Sin(o.inclination       * Deg2Rad);
         double cosW = Math.Cos(o.argumentPeriapsis * Deg2Rad), sinW = Math.Sin(o.argumentPeriapsis * Deg2Rad);
 
-        // Same perifocal -> world rotation as the previous OrbitalComponent.
         double x = (cosO * cosW - sinO * sinW * cosI) * xOrb
                  + (-cosO * sinW - sinO * cosW * cosI) * yOrb;
         double y = (sinI * sinW) * xOrb

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -8,9 +9,12 @@ using UnityEngine.UI;
 /// Gated by the NavComputer loadout tier (NavTier.HasSystemView) - unfitted, the screen still opens but shows
 /// only a "not fitted" message, same pattern as ui.screen.notfitted for sensors.
 ///
-/// Own-ship only for now: the ellipse, Pe/Ap, the reference-plane crossings (AN/DN) and a live true-anomaly
-/// marker, all exact (ShipOrbit's conic, not a sensor read). Catalogue/track layers, the maneuver planner
-/// overlay, the timeline and the galaxy map are later items on the same roadmap and are NOT drawn here yet.
+/// Own-ship orbit is exact (ShipOrbit's conic, not a sensor read): the ellipse, Pe/Ap, the reference-plane
+/// crossings (AN/DN) and a live true-anomaly marker. Catalogue and track layers (roadmap item 2) are drawn on
+/// top, toggle-able, and never touch SensorSight or a live CelestialBody - catalogue orbits come from
+/// Catalogue.CollectOrbitsAroundPrimary (the generated SystemData elements), tracks from TrackManager's own
+/// bearing/range estimates. The maneuver planner overlay, the timeline and the galaxy map are later items on
+/// the same roadmap and are NOT drawn here yet.
 ///
 /// Top-down (world X, Z - see KeplerOrbit's rotation: Y is the out-of-plane axis, so a pure XZ projection is
 /// exactly the ecliptic view every other screen already uses). Inclination doesn't show as tilt in a top-down
@@ -20,15 +24,23 @@ public sealed class NavScreen
 {
     private const float RedrawInterval = 0.1f;
     private const int EllipsePoints = 96;
+    private const int CatalogueEllipsePoints = 72;
     private const float ZoomStep = 1.4f;
     private const float MinPxPerAu = 0.01f, MaxPxPerAu = 200000f;
+    private const float BearingRayPx = 160f; // length of a bearing-only track's ray, screen pixels
 
     private GameObject _root;
     private RectTransform _panelRect, _mapRect, _dialRect;
     private MapCanvas _map, _dial;
     private TextMeshProUGUI _notFitted, _primary, _shape, _incl, _period, _nu;
     private TextMeshProUGUI _peLabel, _apLabel, _anLabel, _dnLabel, _shipLabel;
-    private Button _back, _zoomIn, _zoomOut;
+    private Button _back, _zoomIn, _zoomOut, _layerCatalogue, _layerTracks;
+
+    // Layer toggles (roadmap item 2). Pooled labels grow to fit however many catalogue bodies / tracks exist.
+    private bool _showCatalogue = true, _showTracks = true;
+    private readonly List<TextMeshProUGUI> _catalogueLabels = new List<TextMeshProUGUI>();
+    private readonly List<TextMeshProUGUI> _trackLabels = new List<TextMeshProUGUI>();
+    private readonly List<Catalogue.CataloguedOrbit> _catalogueScratch = new List<Catalogue.CataloguedOrbit>();
 
     private bool _open;
     private float _pixelsPerAu = 40f;
@@ -110,6 +122,14 @@ public sealed class NavScreen
         _zoomOut = UIKit.AddButton(zoomRow, Loc.Get("ui.nav.zoomout"), () => Zoom(1f / ZoomStep), 0f, 34f);
         _zoomIn  = UIKit.AddButton(zoomRow, Loc.Get("ui.nav.zoomin"),  () => Zoom(ZoomStep), 0f, 34f);
 
+        UIKit.AddSpacer(side, 6f);
+        RectTransform layerRow = UIKit.Node("Layers", side);
+        UIKit.HStack(layerRow, 6f, 0, expandWidth: true);
+        _layerCatalogue = UIKit.AddButton(layerRow, Loc.Get("ui.nav.layer.catalogue"), ToggleCatalogue, 0f, 34f);
+        _layerTracks    = UIKit.AddButton(layerRow, Loc.Get("ui.nav.layer.tracks"),    ToggleTracks,    0f, 34f);
+        UIKit.SetButtonActive(_layerCatalogue, _showCatalogue);
+        UIKit.SetButtonActive(_layerTracks, _showTracks);
+
         // Marker labels: a fixed handful, positioned over the map each redraw. No label-declutter yet
         // (handoff item 1 note) - fine at this vertex count (primary, ship, Pe, Ap, AN, DN).
         _peLabel   = MapLabel(_mapRect, Loc.Get("ui.nav.label.pe"), t.navNode);
@@ -189,9 +209,23 @@ public sealed class NavScreen
         _dialRect.gameObject.SetActive(active);
         _zoomIn.gameObject.SetActive(active);
         _zoomOut.gameObject.SetActive(active);
+        _layerCatalogue.gameObject.SetActive(active);
+        _layerTracks.gameObject.SetActive(active);
     }
 
     private void Zoom(float factor) => _pixelsPerAu = Mathf.Clamp(_pixelsPerAu * factor, MinPxPerAu, MaxPxPerAu);
+
+    private void ToggleCatalogue()
+    {
+        _showCatalogue = !_showCatalogue;
+        UIKit.SetButtonActive(_layerCatalogue, _showCatalogue);
+    }
+
+    private void ToggleTracks()
+    {
+        _showTracks = !_showTracks;
+        UIKit.SetButtonActive(_layerTracks, _showTracks);
+    }
     #endregion
 
     // -----------------------------------------------------------------------------------------------------
@@ -205,6 +239,8 @@ public sealed class NavScreen
         if (orbit == null || !orbit.HasTrajectory)
         {
             HideMarkerLabels();
+            HideCatalogueLabels();
+            HideTrackLabels();
             UIKit.SetText(_primary, Loc.Get("ui.nav.none"));
             UIKit.SetText(_shape, ""); UIKit.SetText(_period, ""); UIKit.SetText(_nu, ""); UIKit.SetText(_incl, "");
             _map.Rebuild();
@@ -220,6 +256,9 @@ public sealed class NavScreen
 
         // Primary at the focus.
         _map.AddDot(center, 7f, t.navBody);
+
+        // Catalogue layer (roadmap item 2): drawn first so the ship's own orbit and markers paint over it.
+        DrawCatalogueLayer(orbit, toScreen);
 
         // The conic itself, sampled by true anomaly (uniform for now - adaptive density is a later refinement).
         bool bound = !orbit.Hyperbolic;
@@ -273,8 +312,12 @@ public sealed class NavScreen
         if (Game.Clock != null && orbit.RelativeStateAt(Game.Clock.SimSeconds, out Vector3 shipRel, out Vector3 _))
         {
             shipScreen = toScreen(shipRel);
-            _map.AddDot(shipScreen.Value, 5f, t.accent);
         }
+
+        // Track layer (roadmap item 2): under the live ship marker, over the catalogue/orbit lines.
+        DrawTrackLayer(orbit, shipScreen, toScreen);
+
+        if (shipScreen.HasValue) _map.AddDot(shipScreen.Value, 5f, t.accent);
 
         _map.Rebuild();
         PlaceMarkerLabels(peScreen, apScreen, anScreen, dnScreen, shipScreen);
@@ -288,6 +331,122 @@ public sealed class NavScreen
         UIKit.SetText(_incl, Loc.Get("ui.nav.incl", orbit.Elements.inclination));
 
         DrawDial(orbit.Elements.inclination);
+    }
+
+    /// <summary>Catalogued bodies orbiting the ship's current primary (Catalogue.CollectOrbitsAroundPrimary):
+    /// dim orbit ellipse plus a marker at the body's actual position now. Never reads SensorSight or a live
+    /// CelestialBody - see the class doc.</summary>
+    private void DrawCatalogueLayer(ShipOrbit orbit, Func<Vector3, Vector2> toScreen)
+    {
+        if (!_showCatalogue) { HideCatalogueLabels(); return; }
+
+        Catalogue.CollectOrbitsAroundPrimary(orbit.PrimaryIndex, _catalogueScratch);
+        double simSeconds = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
+        UITheme t = UITheme.Current;
+
+        int shown = 0;
+        for (int i = 0; i < _catalogueScratch.Count; i++)
+        {
+            Catalogue.CataloguedOrbit c = _catalogueScratch[i];
+
+            var pts = new List<Vector2>(CatalogueEllipsePoints + 1);
+            for (int k = 0; k <= CatalogueEllipsePoints; k++)
+            {
+                double nu = k / (double)CatalogueEllipsePoints * Math.PI * 2.0;
+                pts.Add(toScreen(KeplerOrbit.OffsetAtTrueAnomaly(c.orbit, nu)));
+            }
+            _map.AddPolyline(pts, 1f, t.navCatalogue, true);
+
+            Vector2 dot = toScreen(KeplerOrbit.OffsetAt(c.orbit, simSeconds));
+            _map.AddDot(dot, 3f, t.navCatalogue);
+
+            TextMeshProUGUI label = PooledLabel(_catalogueLabels, shown, t.navCatalogue);
+            UIKit.SetText(label, c.name);
+            PlaceFree(label, dot, new Vector2(6f, 6f));
+            shown++;
+        }
+        for (int i = shown; i < _catalogueLabels.Count; i++) _catalogueLabels[i].gameObject.SetActive(false);
+    }
+
+    /// <summary>Every known track: a bearing-only contact draws as a dashed ray from the ship, a ranged one as a
+    /// dot with a 1-sigma tick along the bearing line (TrackManager.BestRange - own-ship's own uncertainty, not
+    /// drawn as a precise position). Colour follows the same searching/locked/selected convention as the
+    /// waterfall (UITheme.WaterfallTrackColor).</summary>
+    private void DrawTrackLayer(ShipOrbit orbit, Vector2? shipScreen, Func<Vector3, Vector2> toScreen)
+    {
+        if (!_showTracks || Game.State == null) { HideTrackLabels(); return; }
+
+        TrackManager tm = Game.State.Tracks;
+        IList<Track> tracks = tm.All;
+        UITheme t = UITheme.Current;
+
+        SystemManager sm = SystemManager.Current;
+        bool havePrimary = sm != null && sm.CurrentData != null && orbit.PrimaryIndex >= 0;
+        Vector3 primaryPos = havePrimary
+            ? sm.CurrentData.PositionOf(orbit.PrimaryIndex, Game.Clock != null ? Game.Clock.SimSeconds : 0.0)
+            : Vector3.zero;
+
+        int shown = 0;
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            Track tr = tracks[i];
+            bool locked = tr.status == TrackStatus.Confirmed;
+            Color color = t.WaterfallTrackColor(tr.id == tm.SelectedId, !locked);
+            float rad = tr.bearing * Mathf.Deg2Rad;
+            Vector2 dir = new Vector2(Mathf.Sin(rad), Mathf.Cos(rad));
+
+            Vector2? mark = null;
+            if (havePrimary && locked && tr.range.Observable)
+            {
+                RangeEstimate re = tr.range;
+                Vector2 dot = toScreen(new Vector3((float)(re.x - primaryPos.x), 0f, (float)(re.z - primaryPos.z)));
+                _map.AddDot(dot, 4f, color);
+                float sigmaPx = (float)(re.rangeSigma / GameConstants.GAME_UNITS_PER_UA) * _pixelsPerAu;
+                _map.AddLine(dot - dir * sigmaPx, dot + dir * sigmaPx, 1f, color);
+                mark = dot;
+            }
+            else if (shipScreen.HasValue)
+            {
+                Vector2 far = shipScreen.Value + dir * BearingRayPx;
+                _map.AddDashedPolyline(new List<Vector2> { shipScreen.Value, far }, 1f, color, 6f, 5f);
+                mark = far;
+            }
+
+            if (mark.HasValue)
+            {
+                TextMeshProUGUI label = PooledLabel(_trackLabels, shown, color);
+                UIKit.SetText(label, tr.name);
+                PlaceFree(label, mark.Value, new Vector2(6f, -6f));
+                shown++;
+            }
+        }
+        for (int i = shown; i < _trackLabels.Count; i++) _trackLabels[i].gameObject.SetActive(false);
+    }
+
+    /// <summary>Gets (creating if needed) the label at `index` of a pool, shows it and sets its colour. Pools
+    /// grow to the largest count seen and are trimmed by hiding, not destroying, so redraws don't churn objects.</summary>
+    private TextMeshProUGUI PooledLabel(List<TextMeshProUGUI> pool, int index, Color color)
+    {
+        while (pool.Count <= index) pool.Add(MapLabel(_mapRect, "", color));
+        TextMeshProUGUI label = pool[index];
+        label.color = color;
+        label.gameObject.SetActive(true);
+        return label;
+    }
+
+    /// <summary>Places a pooled label (anchored 0.5,0.5, pivot 0,0.5 - see MapLabel) at a free-floating screen
+    /// point plus a small pixel offset, the same coordinate fix-up Place() does for the fixed marker labels.</summary>
+    private void PlaceFree(TextMeshProUGUI label, Vector2 screenPos, Vector2 offset)
+        => label.rectTransform.anchoredPosition = screenPos - _mapRect.rect.center + offset;
+
+    private void HideCatalogueLabels()
+    {
+        for (int i = 0; i < _catalogueLabels.Count; i++) _catalogueLabels[i].gameObject.SetActive(false);
+    }
+
+    private void HideTrackLabels()
+    {
+        for (int i = 0; i < _trackLabels.Count; i++) _trackLabels[i].gameObject.SetActive(false);
     }
 
     private void HideMarkerLabels()

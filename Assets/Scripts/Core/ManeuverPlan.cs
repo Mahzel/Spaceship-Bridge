@@ -114,10 +114,11 @@ public sealed class ManeuverPlan
         }
     }
 
-    /// <summary>Staged coarse-to-fine warp rate for the time remaining to the next node, on the same
-    /// {1,10,30,60}x{s,m,h,d} grid the player uses manually (GameClock/StatusBar) - fast while the node is
-    /// far off, settling to real time for the final approach so the burn fires close to on-target.</summary>
-    private static (float, GameClock.WarpUnit) PickWarp(double secondsToNode)
+    /// <summary>Staged coarse-to-fine warp rate for the time remaining to an event, on the same
+    /// {1,10,30,60}x{s,m,h,d} grid the player uses manually (GameClock/StatusBar) - fast while it's far off,
+    /// settling to real time for the final approach. Public: NavEvents' timeline strip reuses this exact
+    /// ladder for its own one-shot "WARP TO" on non-burn events (Pe/Ap passages), rather than duplicating it.</summary>
+    public static (float, GameClock.WarpUnit) PickWarp(double secondsToNode)
     {
         if (secondsToNode > 30.0 * 86400.0) return (60f, GameClock.WarpUnit.Days);
         if (secondsToNode > 5.0  * 86400.0) return (10f, GameClock.WarpUnit.Days);

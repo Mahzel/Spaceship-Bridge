@@ -227,6 +227,13 @@ public static class Loc
         { "ui.nav.transfer.dv",          "dv {0:F2} + {1:F2} km/s   ToF {2:F1} d" },
         { "ui.nav.transfer.create",      "CREATE + ARM NODES" },
 
+        { "ui.nav.timeline",         "TIMELINE" },
+        { "ui.nav.timeline.warpto",  "WARP TO" },
+        { "ui.nav.timeline.row",     "T- {0}   {1}" },
+        { "ui.nav.event.periapsis",  "Periapsis passage" },
+        { "ui.nav.event.apoapsis",   "Apoapsis passage" },
+        { "ui.nav.event.burn",       "Burn #{0} ({1:F2} km/s)" },
+
         // Maneuver
         { "ui.maneuver",  "MANEUVER" },
         { "ui.heading",   "HEADING {0:F1} deg" },

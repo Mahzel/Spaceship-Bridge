@@ -75,6 +75,13 @@ public sealed class NavScreen
     private bool _fitted; // whether AutoFit ran for the orbit currently on screen
     private float _redrawAccum = RedrawInterval;
 
+    // Timeline strip (roadmap item 4): the ship's own next Pe/Ap passage plus each queued burn, soonest first.
+    private const int TimelineRows = 4;
+    private sealed class TimelineRow { public GameObject go; public TextMeshProUGUI label; public Button warpTo; }
+    private readonly TimelineRow[] _timelineRows = new TimelineRow[TimelineRows];
+    private readonly List<NavEvent> _eventScratch = new List<NavEvent>();
+    private GameObject _timelineStrip;
+
     // -----------------------------------------------------------------------------------------------------
     #region Build
     /// <summary>Fills whatever tab-body rect NavigationMode gives it. No background of its own (matching
@@ -109,8 +116,80 @@ public sealed class NavScreen
 
         BuildMap(bodyInner);
         BuildSidebar(bodyInner, t);
+        BuildTimeline(prt);
 
         return prt.gameObject;
+    }
+
+    /// <summary>Roadmap item 4, scoped down to what NavEvents.Collect actually generates (own-ship Pe/Ap +
+    /// queued burns - see its own doc comment for what's still missing). A fixed-height strip under the
+    /// Map+Sidebar row, same "outer LayoutElement / inner Stretch+VStack" decoupling as the sidebar and
+    /// GameShell's own sidebar - see either's comment for why a VerticalLayoutGroup can't share a node with
+    /// the LayoutElement that's supposed to fix this strip's height.</summary>
+    private void BuildTimeline(Transform parent)
+    {
+        UITheme t = UITheme.Current;
+
+        RectTransform outer = UIKit.Node("Timeline", parent);
+        _timelineStrip = outer.gameObject;
+        UIKit.Size(outer, flexibleWidth: 1f, minHeight: 30f + TimelineRows * 28f);
+
+        Image bg = UIKit.AddPanel(outer, "Bg", t.panelColor);
+        RectTransform inner = bg.rectTransform;
+        UIKit.Stretch(inner);
+        var v = UIKit.VStack(inner, 2f, (int)(t.padding * 0.5f));
+        v.childAlignment = TextAnchor.UpperLeft;
+
+        UIKit.AddLabel(inner, Loc.Get("ui.nav.timeline"), t.fontSizeSmall, t.accent);
+
+        for (int i = 0; i < TimelineRows; i++)
+        {
+            var row = new TimelineRow();
+            RectTransform rt = UIKit.Node("Row", inner);
+            row.go = rt.gameObject;
+            UIKit.HStack(rt, 8f, 0).childAlignment = TextAnchor.MiddleLeft;
+
+            row.label = UIKit.AddLabel(rt, "", t.fontSizeSmall, t.text);
+            UIKit.Size(row.label.rectTransform, flexibleWidth: 1f, minHeight: 20f);
+
+            int idx = i; // capture
+            row.warpTo = UIKit.AddButton(rt, Loc.Get("ui.nav.timeline.warpto"), () => WarpToEvent(idx), 90f, 24f);
+
+            row.go.SetActive(false);
+            _timelineRows[i] = row;
+        }
+    }
+
+    /// <summary>WARP TO for a timeline row. A burn just reuses ManeuverPlan's own continuous warp-to-node
+    /// (auto-drops warp as it approaches, exactly what NODES tab's own WARP TO NODE button does) - clicking
+    /// any queued burn's row warps toward the QUEUE's own next node regardless of which one was clicked, since
+    /// the plan fires strictly in order anyway. A Pe/Ap passage isn't armed/continuous like that, so it gets a
+    /// one-shot coarse jump instead (ManeuverPlan.PickWarp's own staged ladder) - close enough to then fine-
+    /// tune manually, same as the coarse end of WARP TO NODE already behaves before its own final approach.</summary>
+    private void WarpToEvent(int index)
+    {
+        if (index < 0 || index >= _eventScratch.Count || Game.Clock == null) return;
+        NavEvent ev = _eventScratch[index];
+        if (ev.kind == NavEventKind.Burn) { Game.State?.Maneuver.StartWarpToNode(); return; }
+
+        (float mult, GameClock.WarpUnit unit) = ManeuverPlan.PickWarp(ev.time - Game.Clock.SimSeconds);
+        Game.Clock.SetWarp(mult, unit);
+    }
+
+    private void RefreshTimeline()
+    {
+        NavEvents.Collect(_eventScratch);
+        double now = Game.Clock != null ? Game.Clock.SimSeconds : 0.0;
+        for (int i = 0; i < TimelineRows; i++)
+        {
+            TimelineRow row = _timelineRows[i];
+            bool show = i < _eventScratch.Count;
+            if (row.go.activeSelf != show) row.go.SetActive(show);
+            if (!show) continue;
+
+            NavEvent ev = _eventScratch[i];
+            UIKit.SetText(row.label, Loc.Get("ui.nav.timeline.row", Loc.Countdown(ev.time - now), ev.label));
+        }
     }
 
     private void BuildMap(Transform parent)
@@ -265,6 +344,7 @@ public sealed class NavScreen
         _notFitted.gameObject.SetActive(!fitted);
         _mapRect.gameObject.SetActive(fitted);
         SetSidebarActive(fitted);
+        _timelineStrip.SetActive(fitted);
         _orbit.Refresh();
         _targetOrbit.Refresh();
         if (!fitted)
@@ -319,6 +399,7 @@ public sealed class NavScreen
         ShipOrbit orbit = Game.State != null ? Game.State.ShipOrbit : null;
         _map.Clear();
         RefreshTransfer();
+        RefreshTimeline();
 
         if (orbit == null || !orbit.HasTrajectory)
         {

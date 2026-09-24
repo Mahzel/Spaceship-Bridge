@@ -641,3 +641,41 @@ uncertainty band. Own-ship data, so no fit/uncertainty band on this one - it's e
 close together to read as a band vs. just a thicker line); whether `band.a *= 0.35f` reads as intended in both
 themes; and whether the predicted-path ellipse and a selected track's own fitted-orbit ellipse stay visually
 distinct when both are on screen at once (navNode yellow vs. whatever WaterfallTrackColor gave the track).
+
+## Progress (this session - item 4, timeline strip)
+
+User said "keep going down the roadmap" (away from a testing environment, working from the suggested-order
+list). Scoped down to what's cheaply and honestly computable right now - see the new file's own doc comment
+for exactly what's NOT generated yet (SOI changes, closest approach to a tracked target, comms windows, jump
+windows - each needs its own prediction machinery this pass didn't build).
+
+- **New `Core/NavEvents.cs`**: `NavEvent { time, kind, label }` + `Collect(List<NavEvent>)`, sorted soonest
+  first. Generates the ship's own next periapsis/apoapsis passage (exact - `KeplerOrbit.MeanAnomalyDeg` against
+  `ShipOrbit.Elements`, the same conic `OrbitPanel` already reads; skipped for a hyperbolic/unbound orbit,
+  where Ap doesn't exist and Pe may already be behind the ship) and each queued `ManeuverPlan` node's burn
+  time (`QueueForSave`, already public). Per the roadmap's own instruction ("one function producing the list,
+  every consumer reads the same one") - the strip below is the only consumer so far, but alerts/map markers
+  can read the exact same list later without new plumbing.
+- **`UI/NavScreen.cs`** gained a fixed-height TIMELINE strip under the Map+Sidebar row (own outer-LayoutElement
+  / inner-Stretch+VStack decoupling, same pattern as the sidebar and `GameShell`'s), up to 4 rows, each a
+  countdown (`Loc.Countdown`, the `D:HH:MM:SS` format added a few commits back) + label + a WARP TO button.
+  Rows past however many events exist are hidden, not blank. `RefreshTimeline` runs inside `Draw()`'s own
+  throttled cadence, right where `RefreshTransfer` already runs.
+- **WARP TO** does different things depending on the row's kind, both deliberately reusing existing machinery
+  rather than inventing a second warp-management system: a BURN row calls `ManeuverPlan.StartWarpToNode()` -
+  the exact same continuous, auto-drops-as-it-approaches warp the NODES tab's own WARP TO NODE button already
+  does (targets the queue's own next node regardless of which burn row was clicked, since the plan fires
+  strictly in order anyway - clicking a later burn just means transiting through the earlier one first, which
+  is correct). A Pe/Ap row isn't an armed/continuous thing, so it gets a one-shot coarse jump instead, reusing
+  `ManeuverPlan.PickWarp`'s own staged {1,10,30,60}x{s,m,h,d} ladder - made `public` (was `private`) rather
+  than duplicated, since both are the same "coarse-to-fine warp for a countdown" concept. This only PARTIALLY
+  satisfies the roadmap's "auto-drop warp before an event (a configurable margin) so the player doesn't skip
+  a burn" framing - real continuous auto-drop only happens for burns (via the pre-existing mechanism), not for
+  Pe/Ap passages, which was a deliberate scope call (an always-on auto-drop for EVERY event, including ones
+  the player doesn't care about, seemed more likely to be annoying than helpful) rather than an oversight.
+
+**Not compile-checked**, same caveat as everywhere else in this file. Worth an in-Editor look at: whether the
+NAV tab still has enough vertical room for the map's own 600px minimum height now that the timeline strip
+(~142px fixed) also claims space in the same column - should be fine at typical window sizes but wasn't
+checked against a small one; and whether a timeline BURN row's WARP TO reliably lands the clock near the
+right event when TWO nodes are queued (departure + arrival, the common case from CREATE NODES).
